@@ -186,6 +186,10 @@ fun AssociationPage(state: RecorderState) {
         generating = true
         reportOpen = true
         scope.launch {
+            // 节流：每个 delta 都写一遍状态会让整页反复重组（真机日志里出现
+            // Skipped 62 frames / Davey 1235ms）。累积到 150ms 才刷新一次界面。
+            val buffer = StringBuilder()
+            var lastPublishMs = 0L
             val result = PublicAiClient.stream(
                 systemPrompt = AiDigest.buildSystemInstruction(),
                 userContent = AiDigest.buildUserContent(
@@ -198,9 +202,18 @@ fun AssociationPage(state: RecorderState) {
                         recentFromMs = AssociationCache.recentFromMs,
                     )
                 ),
-                onDelta = { delta -> reportFlow.value += delta },
+                onDelta = { delta ->
+                    buffer.append(delta)
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (now - lastPublishMs >= 150L) {
+                        lastPublishMs = now
+                        reportFlow.value = buffer.toString()
+                    }
+                },
                 onNotice = { notice -> reportNotice = notice },
             )
+            // 收尾：把最后不足 150ms 的那一段也补上，否则结尾会缺一块
+            reportFlow.value = buffer.toString()
             generating = false
             reportNotice = null
             result.onFailure { reportError = it.message ?: "请求失败" }

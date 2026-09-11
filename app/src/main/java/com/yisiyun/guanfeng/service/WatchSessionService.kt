@@ -115,9 +115,16 @@ class WatchSessionService : Service() {
         )
 
         val extras = Bundle().apply { putBoolean(EXTRA_SHOW_INDICATOR, true) }
-        val text = state?.let {
-            "已记录 ${it.loggedRows} 行 · 垂直位移 %+.0f 米".format(it.trend?.elevationMeters ?: 0f)
-        } ?: "正在记录气压与体感"
+        // 提醒优先走 indicator：实测"转坏提醒"那条通知确实发出去、系统也震动了，
+        // 但**横幅在 ColorOS Watch 上不一定看得到**；而 indicator 是唯一
+        // 被真机证明"一定会出现在表盘顶部"的通道。所以把结论写进它的文案里。
+        val alert = alertText(state)
+        val text = when {
+            alert != null && state != null -> "$alert · 已记录 ${state.loggedRows} 行"
+            state != null -> "已记录 ${state.loggedRows} 行 · 垂直位移 %+.0f 米"
+                .format(state.trend?.elevationMeters ?: 0f)
+            else -> "正在记录气压与体感"
+        }
 
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_guanfeng)
@@ -134,6 +141,20 @@ class WatchSessionService : Service() {
             .addExtras(extras)
             .setCategory(CATEGORY_WORKOUT)
             .build()
+    }
+
+    /** 转坏时给 indicator 的提示语；正常时返回 null。 */
+    private fun alertText(state: com.yisiyun.guanfeng.data.RecorderState?): String? {
+        val formal = state?.trend?.let { com.yisiyun.guanfeng.core.WeatherRule.assess(it) }
+        val fast = state?.trendFast?.let { com.yisiyun.guanfeng.core.WeatherRule.assess(it) }
+        val active = if (formal != null &&
+            formal.likelihood != com.yisiyun.guanfeng.core.RainLikelihood.UNKNOWN
+        ) formal else fast
+        return when (active?.likelihood) {
+            com.yisiyun.guanfeng.core.RainLikelihood.HIGH -> "⚠ 可能转雨"
+            com.yisiyun.guanfeng.core.RainLikelihood.MEDIUM -> "天气转差"
+            else -> null
+        }
     }
 
     companion object {
