@@ -62,8 +62,10 @@ data class TrendResult(
     val deltaHpaPer3h: Float,
     /** 参与回归的「天气样本」数（已剔除高度事件）。 */
     val weatherSamples: Int,
-    /** 被判定为高度事件并剔除的样本数。 */
+    /** 被判定为高度事件并计入解耦的样本数（诊断量：它数的是样本，不是行程次数）。 */
     val elevationEvents: Int,
+    /** 窗口末尾那一刻是否仍处于垂直运动中。UI 用它给用户一个直观的状态，而不是给易误读的计数。 */
+    val isInVerticalTransit: Boolean,
     /** 期间累计垂直位移，正值为上升，单位米（按 0.12 hPa/m 近似换算）。 */
     val elevationMeters: Float,
     /** 线性拟合优度，用于判断这段趋势可不可信。 */
@@ -84,6 +86,7 @@ data class TrendResult(
             deltaHpaPer3h = 0f,
             weatherSamples = samples,
             elevationEvents = 0,
+            isInVerticalTransit = false,
             elevationMeters = 0f,
             fitRSquared = 0f,
             observedDeltaHpa = 0f,
@@ -277,6 +280,7 @@ class PressureTrendEngine(
             deltaHpaPer3h = effectiveRate * 3f,
             weatherSamples = corrected.size,
             elevationEvents = elevationEvents,
+            isInVerticalTransit = inVerticalTransit,
             elevationMeters = -elevationOffset / HPA_PER_METER_NEAR_SEA_LEVEL,
             fitRSquared = rSquared,
             observedDeltaHpa = observedDelta,
