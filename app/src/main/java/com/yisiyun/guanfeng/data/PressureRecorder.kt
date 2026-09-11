@@ -29,7 +29,15 @@ import kotlinx.coroutines.launch
 data class RecorderState(
     val recording: Boolean = false,
     val pressureHpa: Float? = null,
+    /**
+     * 解耦掉高度之后的「天气分量」气压。
+     * 长视图、打卡快照都必须用它——用原始读数会把坐电梯的 9 hPa 算成一次天气剧变。
+     */
+    val weatherPressureHpa: Float? = null,
+    /** 正式趋势（3 小时窗口）。 */
     val trend: TrendResult? = null,
+    /** 速评趋势（5 分钟窗口）：3 小时窗口还没铺满时先给一个结论。 */
+    val trendFast: TrendResult? = null,
     /** 传感器此刻的瞬时心率（`TYPE_HEART_RATE` 直接给的值，不是静息心率）。 */
     val heartRateBpm: Float? = null,
     /**
@@ -86,6 +94,22 @@ object PressureRecorder {
 
     private const val MIN_SAMPLES = 20
 
+    /**
+     * 速评引擎：5 分钟窗口。
+     *
+     * 主人的判断是对的——「3 小时窗口 + 覆盖率 30%」意味着要等约 54 分钟才有结论，
+     * 那是矫枉过正。5 分钟数据确实容易误判，但误判的代价小、等待的代价大。
+     * 因此做成两层：速评先给结论，正式窗口成熟后覆盖它。
+     */
+    private const val FAST_WINDOW_MS = 5L * 60L * 1000L
+    private const val FAST_MIN_SAMPLES = 10
+
+    /** 速评窗口短，绝对量门限必须按比例缩小，否则 5 分钟内永远达不到 0.5 hPa 而恒判「平稳」。 */
+    private const val FAST_MIN_ABSOLUTE_DELTA_HPA = 0.15f
+
+    /** 跨会话状态的落盘节奏（不必每条样本都写盘）。 */
+    private const val PERSIST_INTERVAL_MS = 5L * 60L * 1000L
+
     /** 恢复历史时：超过这个间隔视为断档，断档之前的数据一律不接（跨空洞拟合会造出假趋势）。 */
     private const val MAX_GAP_MS = 5L * 60L * 1000L
 
@@ -109,12 +133,23 @@ object PressureRecorder {
     private var sampleJob: Job? = null
     private var sensorManager: SensorManager? = null
     private var logger: CsvSessionLogger? = null
+    /** 供采样子循环写回跨会话状态用（sampleLoop 里拿不到 start() 的局部变量）。 */
+    private var appContext: Context? = null
     private var startedAtMs = 0L
     private var started = false
 
-    private val engine = PressureTrendEngine(windowMs = WINDOW_MS, minSamples = MIN_SAMPLES)
+    private val engineFormal = PressureTrendEngine(windowMs = WINDOW_MS, minSamples = MIN_SAMPLES)
+    private val engineFast = PressureTrendEngine(
+        windowMs = FAST_WINDOW_MS,
+        minSamples = FAST_MIN_SAMPLES,
+        minAbsoluteDeltaHpa = FAST_MIN_ABSOLUTE_DELTA_HPA,
+    )
     private val aggregator = SampleAggregator()
     private val samples = ArrayList<PressureSample>(MAX_SAMPLES + 1)
+
+    /** 累计的高度偏移（hPa）：所有被引擎判为高度事件的步进之和，跨会话持久化。 */
+    private var elevationOffsetHpa = 0f
+    private var lastPersistMs = 0L
 
     // 传感器原始读数
     private var latestPressure: Float? = null
@@ -141,6 +176,7 @@ object PressureRecorder {
         val manager = applicationContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
 
         sensorManager = manager
+        appContext = applicationContext
         logger = CsvSessionLogger(applicationContext)
         samples.clear()
         latestPressure = null
@@ -169,6 +205,20 @@ object PressureRecorder {
             }
             samples.addAll(restored)
             Log.i(TAG, "从历史续接 ${restored.size} 个样本")
+
+            // 跨会话状态：静息基线 + 累计高度偏移（后者决定天气气压序列的连续性）
+            val persisted = SessionHistory.loadRecorderState(applicationContext)
+            elevationOffsetHpa = persisted.elevationOffsetHpa
+            restingBaseline = persisted.restingHeartRateBpm
+            persisted.restingHeartRateBpm?.let { restingCandidates += it }
+            Log.i(TAG, "恢复状态：静息基线=${persisted.restingHeartRateBpm} 高度偏移=${persisted.elevationOffsetHpa}")
+
+            // 光照趋势回填：读最近 10 分钟的历史读数，趋势立刻可用（不必再等 10 分钟）
+            val since = startedAtMs - LIGHT_TREND_WINDOW_MS
+            val seededLight = SessionHistory.loadRecentLight(applicationContext, since, startedAtMs)
+            seededLight.forEach { (timestamp, lux) -> lightHistory.addLast(timestamp to lux) }
+            seededLight.lastOrNull()?.let { lightLux = it.second }
+            Log.i(TAG, "回填光照读数 ${seededLight.size} 个")
 
             registerSensors(manager)
 
@@ -307,6 +357,7 @@ object PressureRecorder {
             _state.value = _state.value.copy(
                 recording = true,
                 pressureHpa = latestPressure,
+                weatherPressureHpa = latestPressure?.minus(elevationOffsetHpa),
                 heartRateBpm = currentHeartRate,
                 restingHeartRateBpm = restingBaseline,
                 wristTemperatureC = wristTemperature,
@@ -333,21 +384,42 @@ object PressureRecorder {
                 samples.removeAt(0)
             }
 
-            val trend = engine.compute(samples)
+            val formal = engineFormal.compute(samples)
+            val fast = engineFast.compute(samples)
+
+            // 跨窗口累积高度偏移：引擎只报「最后一步」被归为高度事件的量，
+            // 由调用方累加起来，就得到与窗口无关的、只含天气分量的气压。
+            formal.lastElevationStepHpa?.let { elevationOffsetHpa += it }
+            val weatherPressure = sample.pressureHpa - elevationOffsetHpa
 
             val written = logger?.append(
                 timestampMs = sample.timestampMs,
                 pressureHpa = sample.pressureHpa,
                 verticalAccel = sample.verticalAccel,
                 stepsInWindow = sample.stepsInWindow,
-                trend = trend,
+                trend = formal,
                 restingHeartRateBpm = restingBaseline,
                 lightDelta10Min = lightDelta10Min,
+                weatherPressureHpa = weatherPressure,
+                lightLux = lightLux,
             ) ?: false
+
+            if (now - lastPersistMs >= PERSIST_INTERVAL_MS) {
+                lastPersistMs = now
+                appContext?.let { context ->
+                    SessionHistory.saveRecorderState(
+                        context = context,
+                        restingHeartRateBpm = restingBaseline,
+                        elevationOffsetHpa = elevationOffsetHpa,
+                    )
+                }
+            }
 
             _state.value = _state.value.copy(
                 recording = true,
-                trend = trend,
+                trend = formal,
+                trendFast = fast,
+                weatherPressureHpa = weatherPressure,
                 loggedRows = logger?.rowCount ?: 0,
                 logFileName = logger?.displayName ?: "",
                 logHealthy = written,

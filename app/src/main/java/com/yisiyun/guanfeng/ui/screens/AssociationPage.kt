@@ -76,9 +76,14 @@ private const val SUGGESTED_DAYS_FOR_REPORT = 7
 private object AssociationCache {
     var computedAtMs: Long = 0L
     var version: Int = -1
+    /** 近 7 天口径：曲线与页面上的数字用它。 */
     var summary: AssociationSummary? = null
+    /** 全部可用历史口径：AI 报告要两段都给。 */
+    var allSummary: AssociationSummary? = null
     var checkIns: List<CheckInRecord> = emptyList()
 }
+
+private const val DAY_MS = 24L * 60L * 60L * 1000L
 
 /**
  * 第四屏 · 关联：把打卡点叠到气压曲线上，并提供 AI 报告入口。
@@ -117,15 +122,31 @@ fun AssociationPage(state: RecorderState) {
         loading = true
         val zoneOffsetMs = TimeZone.getDefault().getOffset(now).toLong()
         val computed = withContext(Dispatchers.Default) {
-            val hourly = SessionHistory.loadHourlyRollup(context, PERIOD_DAYS, now)
-            val checkIns = CheckInHistory.loadRecent(context, PERIOD_DAYS, now)
-            AssociationAnalyzer.analyze(hourly, checkIns, PERIOD_DAYS, zoneOffsetMs) to checkIns
+            // 一次扫描拿到全部可用历史，再切出近 7 天——
+            // 而不是扫两遍（原始样本量级是十万行，扫两遍纯属浪费）。
+            val allBuckets = SessionHistory.loadHourlyRollup(
+                context,
+                SessionHistory.ALL_HISTORY_DAYS,
+                now,
+            )
+            val recentFromMs = now - PERIOD_DAYS * DAY_MS
+            val recentBuckets = allBuckets.filter { it.hourStartMs >= recentFromMs }
+            val checkIns = CheckInHistory.loadRecent(context, SessionHistory.ALL_HISTORY_DAYS, now)
+            val spanDays = if (allBuckets.isEmpty()) 0 else {
+                ((allBuckets.last().hourStartMs - allBuckets.first().hourStartMs) / DAY_MS).toInt() + 1
+            }
+            ComputedAssociation(
+                recent = AssociationAnalyzer.analyze(recentBuckets, checkIns, PERIOD_DAYS, zoneOffsetMs),
+                all = AssociationAnalyzer.analyze(allBuckets, checkIns, spanDays, zoneOffsetMs),
+                checkIns = checkIns,
+            )
         }
-        AssociationCache.summary = computed.first
-        AssociationCache.checkIns = computed.second
+        AssociationCache.summary = computed.recent
+        AssociationCache.allSummary = computed.all
+        AssociationCache.checkIns = computed.checkIns
         AssociationCache.computedAtMs = now
         AssociationCache.version = checkInVersion
-        summary = computed.first
+        summary = computed.recent
         loading = false
     }
 
@@ -148,6 +169,7 @@ fun AssociationPage(state: RecorderState) {
 
     fun startReport() {
         val snapshot = current ?: return
+        val allSnapshot = AssociationCache.allSummary ?: snapshot
         reportFlow.value = ""
         reportError = null
         reportNotice = null
@@ -155,9 +177,14 @@ fun AssociationPage(state: RecorderState) {
         reportOpen = true
         scope.launch {
             val result = PublicAiClient.stream(
-                systemPrompt = AiDigest.buildSystemInstruction(PERIOD_DAYS),
+                systemPrompt = AiDigest.buildSystemInstruction(),
                 userContent = AiDigest.buildUserContent(
-                    AiDigest.build(snapshot, checkIns, zoneOffsetMs)
+                    AiDigest.build(
+                        allHistory = allSnapshot,
+                        recent = snapshot,
+                        checkIns = checkIns,
+                        zoneOffsetMs = zoneOffsetMs,
+                    )
                 ),
                 onDelta = { delta -> reportFlow.value += delta },
                 onNotice = { notice -> reportNotice = notice },
@@ -194,7 +221,9 @@ fun AssociationPage(state: RecorderState) {
             } else {
                 PressureCheckInChart(
                     hourly = current.hourly,
-                    checkIns = checkIns,
+                    checkIns = checkIns.filter {
+                        it.timestampMs >= current.hourly.first().hourStartMs
+                    },
                     periodDays = PERIOD_DAYS,
                     modifier = Modifier.fillMaxWidth().height(94.dp),
                 )
@@ -403,7 +432,9 @@ private fun PressureCheckInChart(
         drawPath(path = path, color = Color(0xFF7FD1E8), style = Stroke(width = 2f))
 
         checkIns.forEach { record ->
-            val pressure = record.pressureHpa ?: hourly
+            // 优先用解耦掉高度后的天气气压：否则坐完电梯再打卡，
+            // 点会落在被高度污染的高度上，看起来像「气压骤降时不适」。
+            val pressure = record.chartPressureHpa ?: hourly
                 .firstOrNull { it.hourStartMs == HourlyAccumulator.floorToHour(record.timestampMs) }
                 ?.avgHpa
                 ?: return@forEach
@@ -415,3 +446,10 @@ private fun PressureCheckInChart(
         }
     }
 }
+
+/** 一次扫描算出的两段口径。 */
+private data class ComputedAssociation(
+    val recent: AssociationSummary,
+    val all: AssociationSummary,
+    val checkIns: List<CheckInRecord>,
+)

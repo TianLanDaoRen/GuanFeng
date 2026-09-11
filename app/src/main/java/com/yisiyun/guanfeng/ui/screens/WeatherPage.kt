@@ -28,7 +28,14 @@ import com.yisiyun.guanfeng.ui.components.TrendGauge
 /** 第一屏 · 观风：主读数就是那个环形仪表，一眼看风雨倾向与趋势位置。 */
 @Composable
 fun WeatherPage(state: RecorderState) {
-    val trend = state.trend
+    // 双层引擎：正式窗口（3 小时）成熟前，先用速评窗口（5 分钟）顶上。
+    // 等约 54 分钟才有任何结论是矫枉过正——速评可能误判，但误判的代价远小于干等。
+    val formal = state.trend
+    val fast = state.trendFast
+    val formalReady = formal?.let { WeatherRule.assess(it) }?.likelihood
+        ?.let { it != RainLikelihood.UNKNOWN } == true
+    val trend = if (formalReady) formal else (fast ?: formal)
+    val isFast = !formalReady && fast != null
     val assessment = trend?.let { WeatherRule.assess(it) }
     // 「有结论」= 置信度通过了闸门、真的给出了风雨倾向。
     // 不能只看 grade：置信度不足时 grade 仍是「平稳」，会出现
@@ -102,7 +109,11 @@ fun WeatherPage(state: RecorderState) {
             )
             Spacer(Modifier.height(2.dp))
             Text(
-                text = "ΔP(3h) 外推 %+.1f hPa".format(trend?.deltaHpaPer3h ?: 0f),
+                text = if (isFast) {
+                    "速评 · 5 分钟窗口 · 数据越久越准"
+                } else {
+                    "ΔP(3h) 外推 %+.1f hPa".format(trend?.deltaHpaPer3h ?: 0f)
+                },
                 color = Color(0xFF6E6E6E),
                 fontSize = 8.sp,
             )

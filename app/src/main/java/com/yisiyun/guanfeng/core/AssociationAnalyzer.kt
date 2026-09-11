@@ -10,7 +10,12 @@ data class CheckInRecord(
     val intensity: String,
     val pressureHpa: Float?,
     val note: String,
-)
+    /** 解耦掉高度后的天气分量气压：绘制打卡点优先用它，避免电梯后的打卡点位错乱。 */
+    val weatherPressureHpa: Float? = null,
+) {
+    /** 画图与统计都用这个：优先天气分量，旧记录退回首列的气压。 */
+    val chartPressureHpa: Float? get() = weatherPressureHpa ?: pressureHpa
+}
 
 /**
  * 气压 × 不适的观察性小结。

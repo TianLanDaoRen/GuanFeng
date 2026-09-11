@@ -46,6 +46,8 @@ class CheckInLogger(context: Context) {
         heartRateBpm: Float?,
         wristTemperatureC: Float?,
         lightLux: Float?,
+        /** 解耦掉高度后的天气分量气压：关联图上的点要落在它上面，否则电梯后的打卡点位会错乱。 */
+        weatherPressureHpa: Float? = null,
     ): Boolean = runCatching {
         val dateTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(timestampMs))
         val line = listOf(
@@ -62,6 +64,7 @@ class CheckInLogger(context: Context) {
             intensity,
             // 逗号是分隔符，正文里的半角逗号换成全角，避免破坏列结构。
             note.replace(',', '，'),
+            weatherPressureHpa?.let { "%.2f".format(it) } ?: "",
         ).joinToString(",")
         file.appendText(line + "\n")
         true
@@ -78,6 +81,7 @@ class CheckInLogger(context: Context) {
     private companion object {
         const val HEADER =
             "timestamp_ms,datetime,pressure_hpa,delta_hpa_3h,rate_hpa_per_hour," +
-                "elevation_meters,heart_rate_bpm,wrist_temp_c,light_lux,tags,intensity,note"
+                "elevation_meters,heart_rate_bpm,wrist_temp_c,light_lux,tags,intensity,note," +
+                "weather_pressure_hpa"
     }
 }

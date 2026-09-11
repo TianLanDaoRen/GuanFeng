@@ -72,6 +72,8 @@ data class TrendResult(
     val fitRSquared: Float,
     /** 窗口内实测的绝对变压（末样本 − 首样本），单位 hPa。 */
     val observedDeltaHpa: Float,
+    /** 窗口末尾那一步若被归为高度事件，这里是它从原始气压里剔出去的变化量（hPa）；否则为 null。 */
+    val lastElevationStepHpa: Float?,
     /** 实际覆盖的时间跨度（分钟）。 */
     val windowMinutes: Float,
     /** 窗口覆盖比例（0–1）。太低说明样本还没铺满，斜率不可信。 */
@@ -90,6 +92,7 @@ data class TrendResult(
             elevationMeters = 0f,
             fitRSquared = 0f,
             observedDeltaHpa = 0f,
+            lastElevationStepHpa = null,
             windowMinutes = 0f,
             coverageFraction = 0f,
             confidence = TrendConfidence.INSUFFICIENT
@@ -175,6 +178,7 @@ class PressureTrendEngine(
         var elevationEvents = 0
         var inVerticalTransit = false
         var baselineIndex = 0
+        var lastElevationStepHpa: Float? = null
         val corrected = ArrayList<Pair<Long, Float>>(windowed.size)
         corrected += windowed[0].timestampMs to windowed[0].pressureHpa
 
@@ -212,6 +216,11 @@ class PressureTrendEngine(
             if (fastChange && inVerticalTransit && abs(stepDelta) >= minStepDeltaHpa) {
                 elevationOffset += stepDelta
                 elevationEvents++
+                // 只把「最后一步」报出去：调用方据此跨窗口累积偏移，
+                // 从而得到一条与窗口无关的、真正只含天气分量的气压序列。
+                if (index == windowed.lastIndex) {
+                    lastElevationStepHpa = stepDelta
+                }
             }
 
             corrected += sample.timestampMs to (sample.pressureHpa - elevationOffset)
@@ -284,6 +293,7 @@ class PressureTrendEngine(
             elevationMeters = -elevationOffset / HPA_PER_METER_NEAR_SEA_LEVEL,
             fitRSquared = rSquared,
             observedDeltaHpa = observedDelta,
+            lastElevationStepHpa = lastElevationStepHpa,
             windowMinutes = coveredMinutes,
             coverageFraction = coverage.coerceIn(0f, 1f),
             confidence = confidence

@@ -18,6 +18,7 @@ object CheckInHistory {
         val header = lines.first().split(',')
         val iTimestamp = header.indexOf("timestamp_ms")
         val iPressure = header.indexOf("pressure_hpa")
+        val iWeather = header.indexOf("weather_pressure_hpa")
         val iTags = header.indexOf("tags")
         val iIntensity = header.indexOf("intensity")
         val iNote = header.indexOf("note")
@@ -34,6 +35,11 @@ object CheckInHistory {
                 intensity = cells.getOrNull(iIntensity) ?: "",
                 pressureHpa = if (iPressure >= 0) cells.getOrNull(iPressure)?.toFloatOrNull() else null,
                 note = cells.getOrNull(iNote) ?: "",
+                weatherPressureHpa = if (iWeather >= 0) {
+                    cells.getOrNull(iWeather)?.toFloatOrNull()
+                } else {
+                    null
+                },
             )
         }
         return result

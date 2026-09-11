@@ -23,6 +23,9 @@ object SessionHistory {
     private const val FILE_PREFIX = "guanfeng_"
     private const val FILE_SUFFIX = ".csv"
     private const val MAX_ROWS_SCANNED = 20_000
+    private const val RECORDER_STATE_FILE = "recorder_state.txt"
+    private const val KEY_RESTING_HR = "resting_hr"
+    private const val KEY_ELEVATION_OFFSET = "elevation_offset_hpa"
 
     /**
      * 纯解析：CSV 文本 → 样本列表。
@@ -128,8 +131,11 @@ object SessionHistory {
 
     /**
      * 长视图用的小时级降采样：扫描 [days] 天内的会话文件，
-     * **边读边折叠成小时桶，不把整周样本留在内存里**
-     * （一周原始样本约 12 万行 / 15MB，直接读进来在手表上会又慢又占内存）。
+     * **边读边折叠成小时桶，不把整周样本留在内存里**。
+     *
+     * 关键：喂给桶的是 **weather_pressure_hpa（解耦掉高度后的天气分量）**，
+     * 不是气压计原始读数。否则坐一趟电梯（约 9 hPa）会被算成一次「气压大变化日」，
+     * 整张关联图的结论都会被污染。旧文件没有该列时退回原始读数。
      */
     fun loadHourlyRollup(
         context: Context,
@@ -137,7 +143,8 @@ object SessionHistory {
         nowMs: Long,
     ): List<com.yisiyun.guanfeng.core.HourlyBucket> {
         val directory = context.getExternalFilesDir(null) ?: context.filesDir
-        val cutoff = nowMs - days.toLong() * 24 * 60 * 60 * 1000
+        val cutoff = if (days >= ALL_HISTORY_DAYS) 0L
+        else nowMs - days.toLong() * 24 * 60 * 60 * 1000
         val files = directory.listFiles { file ->
             file.isFile && file.name.startsWith(FILE_PREFIX) && file.name.endsWith(FILE_SUFFIX) &&
                 file.lastModified() >= cutoff
@@ -150,19 +157,111 @@ object SessionHistory {
                     val iterator = sequence.iterator()
                     if (!iterator.hasNext()) return@useLines
                     // 用文件真实的表头解析，而不是猜列序——将来增删列也不会读错
-                    val header = iterator.next()
+                    val header = iterator.next().split(',')
+                    val iTimestamp = header.indexOf("timestamp_ms")
+                    val iWeather = header.indexOf("weather_pressure_hpa")
+                    val iRaw = header.indexOf("pressure_hpa")
+                    if (iTimestamp < 0) return@useLines
+                    val iPressure = if (iWeather >= 0) iWeather else iRaw
+                    if (iPressure < 0) return@useLines
+
                     var scanned = 0
                     while (iterator.hasNext()) {
                         val line = iterator.next()
                         scanned++
                         if (scanned > MAX_ROWS_SCANNED) break
-                        parse(listOf(header, line)).firstOrNull()?.let { sample ->
-                            if (sample.timestampMs >= cutoff) accumulator.add(sample)
-                        }
+                        val cells = line.split(',')
+                        val timestamp = cells.getOrNull(iTimestamp)?.toLongOrNull() ?: continue
+                        if (timestamp < cutoff) continue
+                        val pressure = cells.getOrNull(iPressure)?.toFloatOrNull() ?: continue
+                        accumulator.add(timestamp, pressure)
                     }
                 }
             }
         }
         return accumulator.buckets().filter { it.hourStartMs >= cutoff }
     }
+
+    /** 传这个天数表示「全部可用历史」，不受时间窗裁剪。 */
+    const val ALL_HISTORY_DAYS = 100_000
+
+    /** 读取最近一段时间的**原始环境光**读数，用于启动时立刻恢复光照趋势。 */
+    fun loadRecentLight(
+        context: Context,
+        sinceMs: Long,
+        nowMs: Long,
+    ): List<Pair<Long, Float>> {
+        val directory = context.getExternalFilesDir(null) ?: context.filesDir
+        val file = directory.listFiles { candidate ->
+            candidate.isFile && candidate.name.startsWith(FILE_PREFIX) &&
+                candidate.name.endsWith(FILE_SUFFIX)
+        }?.maxByOrNull { it.lastModified() } ?: return emptyList()
+
+        return runCatching {
+            file.bufferedReader().useLines { sequence ->
+                val iterator = sequence.iterator()
+                if (!iterator.hasNext()) return@useLines emptyList()
+                val header = iterator.next().split(',')
+                val iTimestamp = header.indexOf("timestamp_ms")
+                val iLight = header.indexOf("light_lux")
+                if (iTimestamp < 0 || iLight < 0) return@useLines emptyList()
+                val result = ArrayList<Pair<Long, Float>>()
+                while (iterator.hasNext()) {
+                    val cells = iterator.next().split(',')
+                    val timestamp = cells.getOrNull(iTimestamp)?.toLongOrNull() ?: continue
+                    if (timestamp < sinceMs || timestamp > nowMs) continue
+                    val lux = cells.getOrNull(iLight)?.toFloatOrNull() ?: continue
+                    result += timestamp to lux
+                }
+                result.sortedBy { it.first }
+            }
+        }.getOrElse { emptyList() }
+    }
+
+    /** 跨会话需要保留的一点点状态：静息心率基线，以及累计的高度偏移。 */
+    data class RecorderPersistedState(
+        val restingHeartRateBpm: Float?,
+        val elevationOffsetHpa: Float,
+    )
+
+    /**
+     * 读回跨会话状态。
+     *
+     * `elevationOffsetHpa` 尤其重要：它是「解耦掉的高度分量」的累计值。
+     * 若每次重启都从 0 开始，天气气压序列会在重启处跳一下（一次电梯就是 9 hPa），
+     * 长视图会把它当成一次「气压大变化日」。
+     */
+    fun loadRecorderState(context: Context): RecorderPersistedState {
+        val directory = context.getExternalFilesDir(null) ?: context.filesDir
+        val file = File(directory, RECORDER_STATE_FILE)
+        if (!file.isFile) return RecorderPersistedState(null, 0f)
+        return runCatching {
+            var resting: Float? = null
+            var offset = 0f
+            file.readLines().forEach { line ->
+                val parts = line.split('=')
+                if (parts.size != 2) return@forEach
+                when (parts[0].trim()) {
+                    KEY_RESTING_HR -> resting = parts[1].trim().toFloatOrNull()
+                    KEY_ELEVATION_OFFSET -> offset = parts[1].trim().toFloatOrNull() ?: 0f
+                }
+            }
+            RecorderPersistedState(resting, offset)
+        }.getOrElse { RecorderPersistedState(null, 0f) }
+    }
+
+    fun saveRecorderState(
+        context: Context,
+        restingHeartRateBpm: Float?,
+        elevationOffsetHpa: Float,
+    ): Boolean = runCatching {
+        val directory = context.getExternalFilesDir(null) ?: context.filesDir
+        val text = buildString {
+            append(KEY_RESTING_HR).append('=')
+            append(restingHeartRateBpm?.let { "%.1f".format(it) } ?: "").append('\n')
+            append(KEY_ELEVATION_OFFSET).append('=').append("%.3f".format(elevationOffsetHpa)).append('\n')
+        }
+        File(directory, RECORDER_STATE_FILE).writeText(text)
+        true
+    }.getOrDefault(false)
 }

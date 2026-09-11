@@ -24,6 +24,9 @@ data class HourlyBucket(
 /**
  * 边读边折叠，**不把整周样本留在内存里**。
  * 用法：从磁盘逐行解析出样本后立刻 add，最后 buckets() 取结果。
+ *
+ * 注意喂进来的必须是**天气分量**的气压（已解耦掉高度），不是气压计原始读数——
+ * 否则坐一趟电梯（9 hPa）就会被算成一次「气压大变化日」。
  */
 class HourlyAccumulator {
 
@@ -31,21 +34,21 @@ class HourlyAccumulator {
 
     private val partials = HashMap<Long, Partial>()
 
-    fun add(sample: PressureSample) {
-        val hourStart = floorToHour(sample.timestampMs)
+    fun add(timestampMs: Long, pressureHpa: Float) {
+        val hourStart = floorToHour(timestampMs)
         val slot = partials[hourStart]
         if (slot == null) {
-            partials[hourStart] = Partial(sample.pressureHpa.toDouble(), sample.pressureHpa, sample.pressureHpa, 1)
+            partials[hourStart] = Partial(pressureHpa.toDouble(), pressureHpa, pressureHpa, 1)
         } else {
-            slot.sum += sample.pressureHpa
-            if (sample.pressureHpa < slot.min) slot.min = sample.pressureHpa
-            if (sample.pressureHpa > slot.max) slot.max = sample.pressureHpa
+            slot.sum += pressureHpa
+            if (pressureHpa < slot.min) slot.min = pressureHpa
+            if (pressureHpa > slot.max) slot.max = pressureHpa
             slot.count++
         }
     }
 
     fun addAll(samples: Iterable<PressureSample>) {
-        samples.forEach { add(it) }
+        samples.forEach { add(it.timestampMs, it.pressureHpa) }
     }
 
     fun buckets(): List<HourlyBucket> = partials.entries

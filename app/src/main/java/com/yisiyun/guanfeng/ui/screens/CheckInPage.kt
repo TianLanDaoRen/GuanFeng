@@ -170,6 +170,7 @@ fun CheckInPage(state: RecorderState) {
                         heartRateBpm = state.heartRateBpm,
                         wristTemperatureC = state.wristTemperatureC,
                         lightLux = state.lightLux,
+                        weatherPressureHpa = state.weatherPressureHpa,
                     )
                     todayCount = logger.countToday()
                     feedback = if (written) {

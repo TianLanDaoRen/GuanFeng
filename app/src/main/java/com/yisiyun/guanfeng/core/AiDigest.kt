@@ -14,62 +14,91 @@ package com.yisiyun.guanfeng.core
  */
 object AiDigest {
 
-    /** 生成紧凑 JSON（手写而非 org.json：内核保持纯 Kotlin，才能跑 JVM 单测）。 */
+    /**
+     * 生成紧凑 JSON（手写而非 org.json：内核保持纯 Kotlin，才能跑 JVM 单测）。
+     *
+     * 两段口径：
+     *   · `all_history`——全部可用历史（受本地原始数据保留期限制）
+     *   · `recent_7_days`——近 7 天
+     * 之所以分两段：主人的要求是「既看全局也看近期」。
+     * 长期数据能看出反复出现的模式，近期数据更贴近当前状态，两者混在一起反而看不清。
+     */
     fun build(
-        summary: AssociationSummary,
+        allHistory: AssociationSummary,
+        recent: AssociationSummary,
         checkIns: List<CheckInRecord>,
         zoneOffsetMs: Long,
     ): String {
         val tagCounts = checkIns.groupingBy { it.tags }.eachCount()
         val intensityCounts = checkIns.groupingBy { it.intensity }.eachCount()
 
-        val dailyPressure = summary.hourly
-            .groupBy { AssociationAnalyzer.dayStartOf(it.hourStartMs, zoneOffsetMs) }
-            .toSortedMap()
-            .map { (dayStart, buckets) ->
-                DailyPressure(
-                    label = dayLabel(dayStart, zoneOffsetMs),
-                    minHpa = buckets.minOf { it.minHpa },
-                    maxHpa = buckets.maxOf { it.maxHpa },
-                )
-            }
-
         val builder = StringBuilder()
         builder.append('{')
-        builder.append("\"period_days\":").append(summary.periodDays).append(',')
+        builder.append("\"all_history\":").append(scopeObject(allHistory, zoneOffsetMs, includeDaily = false))
+        builder.append(',')
+        builder.append("\"recent_7_days\":")
+            .append(scopeObject(recent, zoneOffsetMs, includeDaily = true))
+        builder.append(',')
+        builder.append("\"check_in_tags\":").append(countObject(tagCounts))
+        builder.append(',')
+        builder.append("\"check_in_intensity\":").append(countObject(intensityCounts))
+        builder.append('}')
+        return builder.toString()
+    }
+
+    private fun scopeObject(
+        summary: AssociationSummary,
+        zoneOffsetMs: Long,
+        includeDaily: Boolean,
+    ): String {
+        val builder = StringBuilder()
+        builder.append('{')
         builder.append("\"days_with_data\":").append(summary.daysWithData).append(',')
         builder.append("\"big_swing_days\":").append(summary.bigSwingDays).append(',')
         builder.append("\"big_swing_threshold_hpa\":").append(AssociationAnalyzer.BIG_SWING_HPA).append(',')
         builder.append("\"big_swing_dates\":").append(stringArray(summary.bigSwingDayLabels)).append(',')
         builder.append("\"check_in_count\":").append(summary.checkInCount).append(',')
-        builder.append("\"check_in_on_big_swing_days\":").append(summary.checkInsOnBigSwingDays).append(',')
-        builder.append("\"check_in_tags\":").append(countObject(tagCounts)).append(',')
-        builder.append("\"check_in_intensity\":").append(countObject(intensityCounts)).append(',')
-        builder.append("\"daily_pressure_hpa\":[").append(
-            dailyPressure.joinToString(",") { day ->
-                "{\"date\":\"${escape(day.label)}\",\"min\":%.1f,\"max\":%.1f}".format(day.minHpa, day.maxHpa)
-            }
-        ).append(']')
+        builder.append("\"check_in_on_big_swing_days\":").append(summary.checkInsOnBigSwingDays)
+        if (includeDaily) {
+            val dailyPressure = summary.hourly
+                .groupBy { AssociationAnalyzer.dayStartOf(it.hourStartMs, zoneOffsetMs) }
+                .toSortedMap()
+                .map { (dayStart, buckets) ->
+                    DailyPressure(
+                        label = dayLabel(dayStart, zoneOffsetMs),
+                        minHpa = buckets.minOf { it.minHpa },
+                        maxHpa = buckets.maxOf { it.maxHpa },
+                    )
+                }
+            builder.append(",\"daily_pressure_hpa\":[").append(
+                dailyPressure.joinToString(",") { day ->
+                    "{\"date\":\"${escape(day.label)}\",\"min\":%.1f,\"max\":%.1f}"
+                        .format(day.minHpa, day.maxHpa)
+                }
+            ).append(']')
+        }
         builder.append('}')
         return builder.toString()
     }
 
     /**
-     * 系统指令：三条硬约束 + 输出形态。
+     * 系统指令：约束 + 输出形态 + 两段口径。
      *
-     * 第 1 条最重要——一周 7 天、几次打卡在统计上不足以支撑任何医学结论，
-     * 模型必须被明确禁止越界；第 4 条是给手表屏幕的：表格与代码块在 189dp 宽上
-     * 根本没法看，直接从源头禁掉，省得再去做渲染。
+     * 第 1 条最重要——样本量在统计上不足以支撑任何医学结论，模型必须被明确禁止越界；
+     * 第 4 条是给手表屏幕的：表格与代码块在 189dp 宽上根本没法看，从源头禁掉。
+     * 第 5 条要求分段作答，因为主人明确要「既看全局也看近期」。
      */
-    fun buildSystemInstruction(periodDays: Int): String = """
-        你是数据分析助手。用户会给你最近 $periodDays 天的「气压」与「自报不适」的聚合统计，
-        不含任何逐条原始记录，也没有身份信息。
+    fun buildSystemInstruction(): String = """
+        你是数据分析助手。用户会给你两段「气压」与「自报不适」的聚合统计：
+        `all_history`（全部可用历史）与 `recent_7_days`（近 7 天），
+        都不含逐条原始记录与身份信息。
 
         严格遵守：
         1. 只做描述性分析，措辞限于「数据显示…可能有关联…建议继续观察」；
            禁止任何医学诊断、病因推断、用药或治疗建议。
         2. 必须明确指出样本量很小、结论不可靠，不要用百分比或术语制造确定性。
-        3. 中文，150 字以内，分三段：数据概况 / 可能存在的关联 / 一条可执行的观察建议。
+        3. 中文，200 字以内，分三段：全局（all_history）观察 / 近期（recent_7_days）观察 /
+           一条可执行的建议。若两段样本量差异大，点明哪一段更可靠。
         4. 不要使用表格、代码块或长列表——阅读终端是一块很小的手表屏幕。
     """.trimIndent()
 

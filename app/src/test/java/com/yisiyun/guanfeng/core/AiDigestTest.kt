@@ -21,11 +21,11 @@ class AiDigestTest {
     private fun bucket(hourStartMs: Long, avg: Float, min: Float = avg, max: Float = avg) =
         HourlyBucket(hourStartMs, avg, min, max, 720)
 
-    private fun summaryWith(checkIns: List<CheckInRecord>): AssociationSummary {
+    private fun summaryWith(checkIns: List<CheckInRecord>, swingHpa: Float = 4f): AssociationSummary {
         val dayStart = 20_454L * day - offset // 2026-01-01 本地
         val hourly = listOf(
             bucket(dayStart + hour, 1000f, 1000f, 1000f),
-            bucket(dayStart + 2 * hour, 996f, 996f, 1000f), // 当天落差 4.0 → 大变化日
+            bucket(dayStart + 2 * hour, 1000f - swingHpa, 1000f - swingHpa, 1000f),
         )
         return AssociationAnalyzer.analyze(hourly, checkIns, 7, offset)
     }
@@ -39,7 +39,8 @@ class AiDigestTest {
             pressureHpa = 996f,
             note = "起床后右侧发紧",
         )
-        val digest = AiDigest.build(summaryWith(listOf(record)), listOf(record), offset)
+        val summary = summaryWith(listOf(record))
+        val digest = AiDigest.build(summary, summary, listOf(record), offset)
 
         assertFalse("备注原文不能出现在上报摘要里", digest.contains("起床后右侧发紧"))
         assertFalse("不应出现逐条打卡时间戳", digest.contains(record.timestampMs.toString()))
@@ -48,36 +49,53 @@ class AiDigestTest {
     }
 
     @Test
-    fun `摘要结构包含分析所需的关键字段`() {
+    fun `摘要分全部历史与近七天天两段口径`() {
         val record = CheckInRecord(20_454L * day - offset + 3 * hour, "头痛", "中", 996f, "")
-        val digest = AiDigest.build(summaryWith(listOf(record)), listOf(record), offset)
+        val recent = summaryWith(listOf(record))
+        // 全部历史：数据更多、有大变化日
+        val all = summaryWith(listOf(record))
 
-        assertTrue(digest.contains("\"period_days\":7"))
-        assertTrue(digest.contains("\"big_swing_days\":1"))
-        assertTrue(digest.contains("\"big_swing_dates\":[\"1/1\"]"))
-        assertTrue(digest.contains("\"check_in_on_big_swing_days\":1"))
-        assertTrue(digest.contains("\"daily_pressure_hpa\":[{\"date\":\"1/1\""))
+        val digest = AiDigest.build(all, recent, listOf(record), offset)
+
+        assertTrue("必须有全部历史段", digest.contains("\"all_history\":{"))
+        assertTrue("必须有近 7 天段", digest.contains("\"recent_7_days\":{"))
+        assertTrue("近 7 天段带每日气压极值", digest.contains("\"daily_pressure_hpa\":["))
+        assertTrue("日期要带上", digest.contains("\"date\":\"1/1\""))
+        assertTrue("阈值要带上，便于模型理解口径", digest.contains("\"big_swing_threshold_hpa\":3.0"))
         assertTrue("必须是合法 JSON 的开头与结尾", digest.startsWith("{") && digest.endsWith("}"))
     }
 
     @Test
-    fun `没有打卡时字段仍然合法`() {
-        val digest = AiDigest.build(summaryWith(emptyList()), emptyList(), offset)
+    fun `只有近期段才带每日气压明细_避免重复上传`() {
+        val record = CheckInRecord(20_454L * day - offset + 3 * hour, "头痛", "中", 996f, "")
+        val summary = summaryWith(listOf(record))
 
-        assertTrue(digest.contains("\"check_in_count\":0"))
-        assertTrue(digest.contains("\"check_in_tags\":{}"))
-        assertTrue(digest.contains("\"check_in_on_big_swing_days\":0"))
+        val digest = AiDigest.build(summary, summary, listOf(record), offset)
+
+        // all_history 段不重复带 daily，控制请求体大小
+        val allSection = digest.substringAfter("\"all_history\":{").substringBefore("\"recent_7_days\"")
+        assertFalse("全部历史段不应重复每日明细", allSection.contains("daily_pressure_hpa"))
     }
 
     @Test
-    fun `系统指令必须带上四条约束`() {
-        val prompt = AiDigest.buildSystemInstruction(7)
+    fun `没有打卡时字段仍然合法`() {
+        val summary = summaryWith(emptyList())
+        val digest = AiDigest.build(summary, summary, emptyList(), offset)
+
+        assertTrue(digest.contains("\"check_in_count\":0"))
+        assertTrue(digest.contains("\"check_in_tags\":{}"))
+    }
+
+    @Test
+    fun `系统指令必须带上四条约束与两段口径`() {
+        val prompt = AiDigest.buildSystemInstruction()
 
         assertTrue("禁止医学结论", prompt.contains("禁止任何医学诊断"))
         assertTrue("必须点明样本量小", prompt.contains("样本量很小"))
-        assertTrue("限定篇幅", prompt.contains("150 字以内"))
+        assertTrue("限定篇幅", prompt.contains("200 字以内"))
         assertTrue("禁止表格与代码块（腕上放不下）", prompt.contains("不要使用表格、代码块"))
-        assertTrue("带上观察周期", prompt.contains("最近 7 天"))
+        assertTrue("要求分两段口径作答", prompt.contains("all_history"))
+        assertTrue(prompt.contains("recent_7_days"))
         assertEquals(prompt, prompt.trim())
     }
 
@@ -92,10 +110,10 @@ class AiDigestTest {
     @Test
     fun `标签里的特殊字符要被转义_不破坏 JSON`() {
         val record = CheckInRecord(20_454L * day - offset, "头痛\"引号", "中", 1000f, "")
-        val digest = AiDigest.build(summaryWith(listOf(record)), listOf(record), offset)
+        val summary = summaryWith(listOf(record))
+        val digest = AiDigest.build(summary, summary, listOf(record), offset)
 
         // 键内部的引号必须转义成 \"；键之后那个引号是 JSON 自身的闭合引号，不能转义。
-        // 完整片段应为：  "头痛\"引号":1
         assertTrue("内部引号必须转义", digest.contains("\\\"引号"))
         assertTrue("转义后仍是合法键值", digest.contains("\\\"引号\":1"))
     }

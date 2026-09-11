@@ -23,9 +23,9 @@ class PressureRollupTest {
         val base = 1_700_000_000_000L
         val floor = HourlyAccumulator.floorToHour(base)
         val accumulator = HourlyAccumulator()
-        accumulator.add(PressureSample(floor + 1_000L, 1000f))
-        accumulator.add(PressureSample(floor + 2_000L, 1006f))
-        accumulator.add(PressureSample(floor + 3_000L, 1002f))
+        accumulator.add(floor + 1_000L, 1000f)
+        accumulator.add(floor + 2_000L, 1006f)
+        accumulator.add(floor + 3_000L, 1002f)
 
         val buckets = accumulator.buckets()
 
@@ -42,9 +42,9 @@ class PressureRollupTest {
         val base = 1_700_000_000_000L
         val floor = HourlyAccumulator.floorToHour(base)
         val accumulator = HourlyAccumulator()
-        accumulator.add(PressureSample(floor + 2 * hour, 1002f))
-        accumulator.add(PressureSample(floor, 1000f))
-        accumulator.add(PressureSample(floor + hour, 1001f))
+        accumulator.add(floor + 2 * hour, 1002f)
+        accumulator.add(floor, 1000f)
+        accumulator.add(floor + hour, 1001f)
 
         val buckets = accumulator.buckets()
 
