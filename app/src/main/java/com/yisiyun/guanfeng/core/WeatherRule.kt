@@ -29,6 +29,16 @@ data class WeatherAssessment(
 
 object WeatherRule {
 
+    /** 净降幅达到此值即按「暴风定律」的门槛给高倾向。 */
+    private const val BIG_FALL_HPA = 4.0f
+
+    /** 净降幅达到此值按中等倾向处理。 */
+    private const val MODERATE_FALL_HPA = 2.0f
+
+    /** 路径效率低于此值即认为"气压在来回振荡"，净变幅不代表真实趋势。 */
+    private const val MIN_PATH_EFFICIENCY = 0.5f
+
+
     /**
      * 置信闸门：置信度不是 OK 就直接给「未知」。
      *
@@ -38,30 +48,101 @@ object WeatherRule {
      * 文案取舍：主屏只有 189×248 dp，长句会折行、把布局顶乱。
      * 因此 shortReason 控制在 6 字以内，完整依据挪到记录页。
      */
-    fun assess(trend: TrendResult): WeatherAssessment {
-        if (trend.confidence != TrendConfidence.OK) {
+    fun assess(
+        trend: TrendResult,
+        /**
+         * 最近若干小时内「天气分量」的净降幅（从区间最高点到现在的差，≤0）。
+         *
+         * 为什么要单独给这个量：**气压降完转入长时间平稳，恰恰是雨正在下的典型形态**。
+         * 只看窗口内斜率的话，随着窗口推移会把"曾经降过 4 hPa"忘得一干二净，
+         * 于是报出「平稳 · 无需带伞」——而外面正在下雨。主人指出的正是这个边界。
+         */
+        recentFallHpa: Float? = null,
+    ): WeatherAssessment {
+        // ① 数据不够：这两条无论何时都不给结论
+        if (trend.confidence == TrendConfidence.SHORT_WINDOW ||
+            trend.confidence == TrendConfidence.INSUFFICIENT
+        ) {
             return WeatherAssessment(
                 likelihood = RainLikelihood.UNKNOWN,
-                shortReason = when (trend.confidence) {
-                    TrendConfidence.SHORT_WINDOW -> "样本未铺满"
-                    TrendConfidence.NOISY -> "抖动过大"
-                    else -> "样本不足"
+                shortReason = if (trend.confidence == TrendConfidence.SHORT_WINDOW) {
+                    "样本未铺满"
+                } else {
+                    "样本不足"
                 },
                 advice = "再等等",
-                rationale = when (trend.confidence) {
-                    TrendConfidence.SHORT_WINDOW ->
-                        "窗口只覆盖 %.0f%%，样本还没铺满，斜率不可信"
-                            .format(trend.coverageFraction * 100f)
+                rationale = if (trend.confidence == TrendConfidence.SHORT_WINDOW) {
+                    "窗口只覆盖 %.0f%%，样本还没铺满，斜率不可信".format(trend.coverageFraction * 100f)
+                } else {
+                    "有效样本 ${trend.weatherSamples} 个，还不足以判断趋势"
+                },
+            )
+        }
 
-                    TrendConfidence.NOISY ->
-                        "窗口内气压抖动过大（R² %.2f），算出的 %.2f hPa/h 撑不起判断"
-                            .format(trend.fitRSquared, trend.rateHpaPerHour)
+        /*
+         * ② 净变幅优先于斜率。
+         *
+         * R² 衡量的是"气压曲线有多接近一条直线"，而**先急降后转平**这条最典型的降雨曲线
+         * 恰恰不直——于是旧逻辑会把最该报警的形态判成「抖动过大」，进而退回速评，
+         * 甚至直接说「无需带伞」。而"降了多少"这个量根本不需要线性拟合。
+         *
+         * 判据来源也支持这么做：气象学「暴风定律」说的是"3 小时降 4 hPa"这个**净降量**，
+         * 维基说的「气压变化超过 3.5 hPa」同样是净量。斜率只用来回答"此刻降得多快"。
+         */
+        val netChange = trend.observedDeltaHpa
+        val recentFall = recentFallHpa ?: 0f
+        val worstFall = minOf(netChange, recentFall)
+        // 路径效率：净变幅 ÷ 路程。先降后平 ≈ 1，来回振荡 ≈ 0。
+        // 只看净变幅会把振荡噪声也当成急降报出去——这是捷径式实现的典型坑。
+        val pathEfficiency = if (trend.pathLengthHpa > 0.01f) {
+            kotlin.math.abs(netChange) / trend.pathLengthHpa
+        } else {
+            1f
+        }
+        val netTrustworthy = pathEfficiency >= MIN_PATH_EFFICIENCY
 
-                    TrendConfidence.INSUFFICIENT ->
-                        "有效样本 ${trend.weatherSamples} 个，还不足以判断趋势"
+        if (netTrustworthy && worstFall <= -BIG_FALL_HPA) {
+            return WeatherAssessment(
+                likelihood = RainLikelihood.HIGH,
+                shortReason = if (recentFall < netChange) "已降幅较大" else "窗口内急降",
+                advice = "带伞",
+                rationale = "窗口内净降 %.1f hPa，最近数小时累计降幅 %.1f hPa，" +
+                    "已达「暴风定律」的 %.0f hPa 门槛（该定律描述的是净降量，不是瞬时斜率）"
+                        .format(netChange, recentFall, BIG_FALL_HPA)
+            )
+        }
+        if (netTrustworthy && worstFall <= -MODERATE_FALL_HPA) {
+            return WeatherAssessment(
+                likelihood = RainLikelihood.MEDIUM,
+                shortReason = if (recentFall < netChange) "已降幅偏大" else "气压缓降",
+                advice = "备把伞",
+                rationale = "窗口内净降 %.1f hPa，最近数小时累计降幅 %.1f hPa，" +
+                    "天气有转坏倾向".format(netChange, recentFall)
+            )
+        }
 
-                    TrendConfidence.OK -> ""
-                }
+        // ③ R² 只用来决定"能不能谈斜率"——净变幅已在上一步处理完
+        if (trend.confidence == TrendConfidence.NOISY && !netTrustworthy) {
+            // 来回振荡：路程远大于净变幅，斜率与净量都不可信 → 诚实地说未知
+            return WeatherAssessment(
+                likelihood = RainLikelihood.UNKNOWN,
+                shortReason = "抖动过大",
+                advice = "再等等",
+                rationale = "窗口内气压在来回振荡（路径 %.1f hPa 而净变 %.1f hPa，效率 %.0f%%），" +
+                    "既算不出可信斜率、净量也不代表真实趋势"
+                        .format(trend.pathLengthHpa, netChange, pathEfficiency * 100)
+            )
+        }
+        if (trend.confidence == TrendConfidence.NOISY) {
+            // 路径干净但曲线不直——典型的"降完转平"：净量不大且已停止恶化，
+            // 这时给"已转平稳"比退回速评更诚实。
+            return WeatherAssessment(
+                likelihood = RainLikelihood.LOW,
+                shortReason = "已转平稳",
+                advice = "暂无需带伞",
+                rationale = "窗口内气压曲线不接近直线（R² %.2f），但净变幅只有 %.1f hPa，" +
+                    "说明此前的变化已结束、当前没有继续恶化"
+                        .format(trend.fitRSquared, netChange)
             )
         }
 

@@ -72,6 +72,15 @@ data class TrendResult(
     val fitRSquared: Float,
     /** 窗口内实测的绝对变压（末样本 − 首样本），单位 hPa。 */
     val observedDeltaHpa: Float,
+    /**
+     * 窗口内气压曲线走过的总路程（相邻步变化量绝对值之和，hPa）。
+     *
+     * 用途：与 |observedDeltaHpa| 相除得到**路径效率**，用来区分两种"R² 都很低"的形态：
+     *   · 先急降后转平——净降 4 hPa、路程 4 hPa → 效率 ≈ 1（真实的降水过程）
+     *   · 来回振荡——净变 0 hPa、路程 30 hPa → 效率 ≈ 0（噪声）
+     * 只看净变幅会把后者也当成急降报出去，这是捷径式实现的典型坑。
+     */
+    val pathLengthHpa: Float,
     /** 窗口末尾那一步若被归为高度事件，这里是它从原始气压里剔出去的变化量（hPa）；否则为 null。 */
     val lastElevationStepHpa: Float?,
     /** 实际覆盖的时间跨度（分钟）。 */
@@ -92,6 +101,7 @@ data class TrendResult(
             elevationMeters = 0f,
             fitRSquared = 0f,
             observedDeltaHpa = 0f,
+            pathLengthHpa = 0f,
             lastElevationStepHpa = null,
             windowMinutes = 0f,
             coverageFraction = 0f,
@@ -179,6 +189,7 @@ class PressureTrendEngine(
         var inVerticalTransit = false
         var baselineIndex = 0
         var lastElevationStepHpa: Float? = null
+        var pathLength = 0f
         val corrected = ArrayList<Pair<Long, Float>>(windowed.size)
         corrected += windowed[0].timestampMs to windowed[0].pressureHpa
 
@@ -186,6 +197,7 @@ class PressureTrendEngine(
             val sample = windowed[index]
             val previous = windowed[index - 1]
             val stepDelta = sample.pressureHpa - previous.pressureHpa
+            pathLength += abs(stepDelta)
 
             // 基线指针只前进不回退，保持 O(n)。
             while (baselineIndex + 1 < index &&
@@ -293,6 +305,7 @@ class PressureTrendEngine(
             elevationMeters = -elevationOffset / HPA_PER_METER_NEAR_SEA_LEVEL,
             fitRSquared = rSquared,
             observedDeltaHpa = observedDelta,
+            pathLengthHpa = pathLength,
             lastElevationStepHpa = lastElevationStepHpa,
             windowMinutes = coveredMinutes,
             coverageFraction = coverage.coerceIn(0f, 1f),

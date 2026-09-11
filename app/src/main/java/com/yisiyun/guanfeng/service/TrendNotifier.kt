@@ -48,10 +48,15 @@ object TrendNotifier {
     private const val LEGACY_CHANNEL_ID = "guanfeng_trend_alert"
     private const val NOTIFICATION_ID = 2001
 
-    /** 两次提醒之间的最短间隔。 */
-    private const val MIN_INTERVAL_MS = 2L * 60L * 60L * 1000L
+    /**
+     * 同一等级的最短重复间隔。
+     *
+     * 主人要求：**风雨等级只要有变化就应该提醒**。所以判据从"只在升到高时提醒"
+     * 改成"等级变了就提醒"，冷却只用来防止在两级之间来回抖动时刷屏。
+     */
+    private const val MIN_INTERVAL_MS = 10L * 60L * 1000L
 
-    private var armed = true
+    private var lastLevel: RainLikelihood? = null
     private var lastNotifiedAtMs = 0L
 
     /**
@@ -60,7 +65,7 @@ object TrendNotifier {
      * 为什么不靠通知来震动：**手表的 SystemUI 有 canPost 白名单**，
      * 第三方应用的本地通知连提醒流程都不走——真机实测点下去毫无震动
      * （通知能进系统数据库、也留下了 mVibrateNotificationKey 记录，但马达没转）。
-     * 所以提醒的第一条腿是自己调 Vibrator。
+     * 系统侧可验证的证据是 `aidl_vibrator: Vibrator on for timeoutMs: 600`。
      */
     fun vibrateAlert(context: Context) {
         val audio = context.getSystemService(android.media.AudioManager::class.java)
@@ -68,7 +73,7 @@ object TrendNotifier {
         if (audio?.ringerMode == android.media.AudioManager.RINGER_MODE_SILENT) return
         val vibrator = context.getSystemService(android.os.Vibrator::class.java) ?: return
         if (!vibrator.hasVibrator()) return
-        // 三短一长，与普通通知的"两下"区分开：不看表也能分辨是转坏提醒
+        // 三短一长，与普通通知的"两下"区分开：不看表也能分辨是天气提醒
         val pattern = longArrayOf(0, 350, 200, 350, 200, 600)
         runCatching {
             vibrator.vibrate(android.os.VibrationEffect.createWaveform(pattern, -1))
@@ -79,9 +84,8 @@ object TrendNotifier {
      * 测试提醒：完整走一遍真实提醒的两条腿——**震动 + 落一条待确认提醒**。
      *
      * 通知这条路已被系统白名单堵死（实测毫无震动也不上屏），
-     * indicator 又只能显示图标、显示不了文字（主人实测更正），
+     * indicator 又只显示图标、显示不了文字，
      * 所以真正能把"是什么事"讲清楚的只有应用内的确认弹窗。
-     * 这个测试按钮就是用来验证那整条链路的。
      */
     fun triggerTestAlert(context: Context) {
         vibrateAlert(context)
@@ -100,17 +104,20 @@ object TrendNotifier {
             NotificationChannel(
                 CHANNEL_ID,
                 "天气转坏提醒",
-                // HIGH：这是需要用户当时就知道了的信息，应当以横幅弹出。
-                // 声音与震动由系统按用户自己的设置处理，应用不自建震动模式。
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
-                description = "气压快速下降、可能转雨时提醒一次"
+                description = "气压变化导致风雨倾向改变时提醒"
                 enableVibration(true)
             }
         )
     }
 
-    /** 每次算出趋势后调用；内部自己判断该不该真的发。 */
+    /**
+     * 每次算出趋势后调用。
+     *
+     * 触发条件：**倾向等级发生变化**（低↔中↔高之间任意跳变，含转好）。
+     * 转好也提醒是有意的——"雨要停了"和"雨要来了"一样是用户想知道的信息。
+     */
     fun maybeNotify(
         context: Context,
         likelihood: RainLikelihood,
@@ -118,30 +125,23 @@ object TrendNotifier {
         trend: TrendResult?,
         nowMs: Long = System.currentTimeMillis(),
     ) {
-        // 回落到低之后重新武装，这样"降了又升、又降"能被提醒两次
-        if (likelihood == RainLikelihood.LOW || likelihood == RainLikelihood.UNKNOWN) {
-            armed = true
-            return
-        }
-        if (!armed) return
-        if (likelihood != RainLikelihood.HIGH) return
+        if (likelihood == RainLikelihood.UNKNOWN) return
+        val previous = lastLevel
+        if (likelihood == previous) return
+        lastLevel = likelihood
+        // 首次拿到结论时也提醒一次（此前是"未知"）
         if (nowMs - lastNotifiedAtMs < MIN_INTERVAL_MS) return
-
-        val delta = trend?.deltaHpaPer3h ?: 0f
-        val body = buildString {
-            append("3 小时变压 %+.1f hPa".format(delta))
-            append(" · ").append(assessment.advice)
-            append(" · ").append(assessment.shortReason)
-        }
-        // 第一条腿：直接震动——实测唯一真的能让人感觉到的通道
-        vibrateAlert(context)
-        // 第二条腿：落一条待确认提醒，用户切回应用时弹出，点「我已知晓」才消失。
-        // 这才是真正能把信息讲清楚的那条路（通知与 indicator 都做不到）。
-        PendingAlertStore.record(context, "气压急降 · 可能转雨", body, nowMs)
-        // indicator 文案仍更新一份（只有图标会显示，但通知记录里留痕，便于事后核对）
-        AlertState.requestRefresh()
-        armed = false
         lastNotifiedAtMs = nowMs
+
+        val body = buildString {
+            previous?.let { append("由「").append(it.label).append("」变为「").append(likelihood.label).append("」 · ") }
+            append("3 小时净变 %.1f hPa".format(trend?.observedDeltaHpa ?: 0f))
+            append(" · ").append(assessment.advice)
+        }
+        vibrateAlert(context)
+        PendingAlertStore.record(context, "风雨倾向：${likelihood.label}", body, nowMs)
+        AlertState.requestRefresh()
+        post(context, "风雨倾向：${likelihood.label}", body)
     }
 
     private fun post(context: Context, title: String, text: String): Boolean = runCatching {
@@ -172,7 +172,7 @@ object TrendNotifier {
 
     /** 供测试或状态重置使用。 */
     fun resetForTest() {
-        armed = true
+        lastLevel = null
         lastNotifiedAtMs = 0L
     }
 }

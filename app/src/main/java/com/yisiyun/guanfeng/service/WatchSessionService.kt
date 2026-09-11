@@ -166,8 +166,8 @@ class WatchSessionService : Service() {
     private fun alertText(state: com.yisiyun.guanfeng.data.RecorderState?): String? {
         // 测试窗口优先：让主人能立刻看到"真的转坏时"indicator 长什么样
         AlertState.activeTestLabel()?.let { return it }
-        val formal = state?.trend?.let { com.yisiyun.guanfeng.core.WeatherRule.assess(it) }
-        val fast = state?.trendFast?.let { com.yisiyun.guanfeng.core.WeatherRule.assess(it) }
+        val formal = state?.trend?.let { com.yisiyun.guanfeng.core.WeatherRule.assess(it, state.recentFallHpa) }
+        val fast = state?.trendFast?.let { com.yisiyun.guanfeng.core.WeatherRule.assess(it, state.recentFallHpa) }
         val active = if (formal != null &&
             formal.likelihood != com.yisiyun.guanfeng.core.RainLikelihood.UNKNOWN
         ) formal else fast

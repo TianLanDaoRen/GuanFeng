@@ -47,6 +47,11 @@ data class RecorderState(
     val trendFast: TrendResult? = null,
     /** 是否处于静止（无步数且加速度低）。健身中不做体感提示，见 CorroborationEngine。 */
     val isResting: Boolean = true,
+    /**
+     * 最近 [RECENT_FALL_WINDOW_MS] 内「天气分量」的累计净降幅（≤0）。
+     * 用于记住"曾经降过"，避免气压降完转平后就被判成「无需带伞」。
+     */
+    val recentFallHpa: Float = 0f,
     /** 传感器此刻的瞬时心率（`TYPE_HEART_RATE` 直接给的值，不是静息心率）。 */
     val heartRateBpm: Float? = null,
     /**
@@ -118,6 +123,12 @@ object PressureRecorder {
     /** 速评窗口短，绝对量门限必须按比例缩小，否则 5 分钟内永远达不到 0.5 hPa 而恒判「平稳」。 */
     private const val FAST_MIN_ABSOLUTE_DELTA_HPA = 0.15f
 
+    /** 累计降幅的观察窗：足够长到能记住一场天气过程，又不至于记住上一天的旧账。 */
+    private const val RECENT_FALL_WINDOW_MS = 6L * 60L * 60L * 1000L
+
+    /** 少于这么多个样本（约 10 分钟）就不算累计降幅，避免刚启动时报出假降幅。 */
+    private const val RECENT_FALL_MIN_SAMPLES = 120
+
     /** 跨会话状态的落盘节奏（不必每条样本都写盘）。 */
     private const val PERSIST_INTERVAL_MS = 5L * 60L * 1000L
 
@@ -169,6 +180,12 @@ object PressureRecorder {
 
     /** 小时归档累加器：整点切换时把上一小时落盘（长期历史靠它，原始文件可以放心裁剪）。 */
     private val hourAccumulator = HourAccumulator()
+
+    /** 天气分量的近期轨迹（只留 [RECENT_FALL_WINDOW_MS]），用于算累计降幅。 */
+    private val weatherTrace = ArrayList<Pair<Long, Float>>(MAX_SAMPLES)
+
+    /** 最近 [RECENT_FALL_WINDOW_MS] 内的累计净降幅。 */
+    private var recentFallHpa = 0f
 
     // 传感器原始读数
     private var latestPressure: Float? = null
@@ -456,6 +473,20 @@ object PressureRecorder {
             formal.lastElevationStepHpa?.let { elevationOffsetHpa += it }
             val weatherPressure = sample.pressureHpa - elevationOffsetHpa
 
+            // 记住"最近降过多少"：取近期最高点与当前值之差。
+            // 气压降完转入长时间平稳正是雨在下/雨将至的形态，只看窗口斜率会把它忘掉。
+            weatherTrace.add(sample.timestampMs to weatherPressure)
+            while (weatherTrace.size > 1 &&
+                sample.timestampMs - weatherTrace[0].first > RECENT_FALL_WINDOW_MS
+            ) {
+                weatherTrace.removeAt(0)
+            }
+            recentFallHpa = if (weatherTrace.size >= RECENT_FALL_MIN_SAMPLES) {
+                weatherPressure - weatherTrace.maxOf { it.second }
+            } else {
+                0f
+            }
+
             // 小时归档：整点切换时把上一小时落盘。
             // 体感数据也一并归档——AI 报告需要它们来判断混淆因素（例如头痛是否来自发热）。
             // 心率/腕温/光照取 liveLoop 写入的最新读数（它们比 5 秒聚合节奏快）。
@@ -505,8 +536,8 @@ object PressureRecorder {
             // 主动提醒：转坏到「高」时发一条通知（声音与震动交给系统）。
             // 只在升级时发一次并带冷却，避免变成噪音源——被关掉通知的提醒等于不存在。
             runCatching {
-                val formalAssessment = WeatherRule.assess(formal)
-                val fastAssessment = WeatherRule.assess(fast)
+                val formalAssessment = WeatherRule.assess(formal, recentFallHpa)
+                val fastAssessment = WeatherRule.assess(fast, recentFallHpa)
                 val active = if (formalAssessment.likelihood != RainLikelihood.UNKNOWN) {
                     formalAssessment to formal
                 } else {
@@ -527,6 +558,7 @@ object PressureRecorder {
                 trend = formal,
                 trendFast = fast,
                 isResting = restingNow,
+                recentFallHpa = recentFallHpa,
                 weatherPressureHpa = weatherPressure,
                 loggedRows = logger?.rowCount ?: 0,
                 logFileName = logger?.displayName ?: "",

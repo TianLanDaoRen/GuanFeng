@@ -34,11 +34,11 @@ fun WeatherPage(state: RecorderState) {
     // 等约 54 分钟才有任何结论是矫枉过正——速评可能误判，但误判的代价远小于干等。
     val formal = state.trend
     val fast = state.trendFast
-    val formalReady = formal?.let { WeatherRule.assess(it) }?.likelihood
+    val formalReady = formal?.let { WeatherRule.assess(it, state.recentFallHpa) }?.likelihood
         ?.let { it != RainLikelihood.UNKNOWN } == true
     val trend = if (formalReady) formal else (fast ?: formal)
     val isFast = !formalReady && fast != null
-    val assessment = trend?.let { WeatherRule.assess(it) }
+    val assessment = trend?.let { WeatherRule.assess(it, state.recentFallHpa) }
     // 「有结论」= 置信度通过了闸门、真的给出了风雨倾向。
     // 不能只看 grade：置信度不足时 grade 仍是「平稳」，会出现
     // 环心写「未知」、下面写「平稳」、底部又写「再等等」的三处自相矛盾。
