@@ -81,11 +81,11 @@ fun WeatherPage(state: RecorderState) {
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(3.dp))
+            // 只放短依据：主屏 189dp 宽，长句会折行并把布局顶乱（完整依据在记录页）
             Text(
-                text = assessment?.rationale ?: "窗口内样本不足",
+                text = assessment?.shortReason ?: "样本不足",
                 color = Color(0xFF8A8A8A),
-                fontSize = 8.sp,
-                lineHeight = 11.sp,
+                fontSize = 9.sp,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(2.dp))
