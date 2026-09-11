@@ -135,13 +135,18 @@ class PressureTrendEngineTest {
     @Test
     fun `电梯匀速段加速度为零也必须被剔除`() {
         // 真实电梯：起步有一下加速度脉冲，随后匀速（加速度≈0、无步数），
-        // 但气压仍以约 1.8 hPa/min 持续变化。只认瞬时证据会漏掉匀速段。
+        // 但气压仍在持续变化。只认瞬时证据会漏掉匀速段。
+        //
+        // 速率用真机实测值：OWW221 上电梯单趟 −70.5 米 ≈ 11 hPa/min。
+        // 原先这里用 1.8 hPa/min（合成值），在把高度门限提到 0.3 hPa/min 之后
+        // 就掉出了判据——但那是夹具不真实，不是引擎的问题：
+        // 1.8 hPa/min 会在前 26 秒里低于门限，而真实电梯 15 秒内就已越过。
         val samples = ArrayList<PressureSample>(200)
         var pressure = 1000f
         val tickMs = 2_000L
         for (index in 0 until 200) {
             val riding = index in 60..90
-            if (riding) pressure -= 0.06f // 每 2 秒 0.06 hPa，即 1.8 hPa/min
+            if (riding) pressure -= 0.367f // 每 2 秒 0.367 hPa，即 11 hPa/min（真机实测值）
             samples += PressureSample(
                 timestampMs = startMs + index * tickMs,
                 pressureHpa = pressure,
@@ -154,7 +159,8 @@ class PressureTrendEngineTest {
 
         assertEquals("匀速段不得被当成天气变化", TrendGrade.STEADY, result.grade)
         assertEquals(31, result.elevationEvents)
-        assertEquals(15.5f, result.elevationMeters, 1f)
+        // 31 步 × 0.367 hPa = 11.4 hPa ÷ 0.12 hPa/米 ≈ 95 米（真机电梯量级）
+        assertEquals(95f, result.elevationMeters, 2f)
     }
 
     @Test
@@ -172,6 +178,41 @@ class PressureTrendEngineTest {
         assertEquals(0, result.elevationEvents)
         assertEquals(TrendGrade.FALLING, result.grade)
         assertEquals(-1.0f, result.rateHpaPerHour, 0.1f)
+    }
+
+    @Test
+    fun `屋里活动加缓慢天气变化_不得攒出假的垂直位移`() {
+        // 2026-09-11 真机事故的复现夹具。
+        //
+        // 实况：主人在屋里活动（躺下、起来、走动）整个下午，气压缓慢下降
+        // （3.75 小时约 0.9 hPa）。旧门限 0.1 hPa/min 之下，
+        // 手腕每动一下就可能把当步气压差记成"垂直位移"，累计攒出 +10 米，
+        // 进而吃掉真实天气降幅，把一场转雨过程记成了「平稳」。
+        //
+        // 真机数据里 30 秒气压变化的中位数只有 0.010 hPa、最大 0.120 hPa，
+        // 而旧门限相当于 30 秒 0.05 hPa——有 4.6% 的窗口越过它。
+        // 门限提到 0.3 hPa/min（30 秒 0.15 hPa）之后越界窗口为 0。
+        val tickMs = 5_000L
+        val samples = ArrayList<PressureSample>(2700)
+        var pressure = 1004.1f
+        for (index in 0 until 2700) {
+            // 缓慢天气下降：0.01 hPa / 15 秒 ≈ 0.04 hPa/min，远低于门限
+            if (index % 3 == 0) pressure -= 0.01f
+            samples += PressureSample(
+                timestampMs = startMs + index * tickMs,
+                pressureHpa = pressure,
+                // 手腕一直在动：躺下、起来、走动的竖直加速度远超阈值
+                verticalAccel = if (index % 8 == 0) 12f else 0.1f,
+                stepsInWindow = if (index % 20 < 4) 6 else 0
+            )
+        }
+
+        val result = PressureTrendEngine().compute(samples)
+
+        assertEquals("屋里活动不该被记为高度事件", 0, result.elevationEvents)
+        assertEquals("累计垂直位移必须接近 0", 0f, result.elevationMeters, 0.5f)
+        // 注意窗口是 3 小时，而序列有 3.75 小时，所以窗口内净变是 7.2 hPa 而不是全部 9.0
+        assertEquals("真实的气压下降必须完整留在天气分量里", -7.2f, result.observedDeltaHpa, 0.5f)
     }
 
     @Test
