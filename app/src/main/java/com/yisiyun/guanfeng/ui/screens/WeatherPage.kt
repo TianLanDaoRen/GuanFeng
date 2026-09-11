@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.yisiyun.guanfeng.core.CorroborationEngine
 import com.yisiyun.guanfeng.core.RainLikelihood
 import com.yisiyun.guanfeng.core.TrendGrade
 import com.yisiyun.guanfeng.core.WeatherRule
@@ -40,8 +41,25 @@ fun WeatherPage(state: RecorderState) {
     // 「有结论」= 置信度通过了闸门、真的给出了风雨倾向。
     // 不能只看 grade：置信度不足时 grade 仍是「平稳」，会出现
     // 环心写「未知」、下面写「平稳」、底部又写「再等等」的三处自相矛盾。
-    val hasConclusion = assessment != null &&
+    val rawHasConclusion = assessment != null &&
         assessment.likelihood != RainLikelihood.UNKNOWN
+
+    // 体感与环境佐证：只有光照骤降允许升档（物理因果），
+    // 心率与腕温只上屏提示——理由写在 CorroborationEngine 的注释里。
+    val corroborations = CorroborationEngine.evaluate(
+        lightLux = state.lightLux,
+        lightDelta10Min = state.lightDelta10Min,
+        heartRateBpm = state.heartRateBpm,
+        restingHeartRateBpm = state.restingHeartRateBpm,
+        wristTemperatureC = state.wristTemperatureC,
+        wristTempBaselineC = state.wristTemperatureBaselineC,
+    )
+    val likelihood = if (rawHasConclusion) {
+        CorroborationEngine.apply(assessment!!.likelihood, corroborations)
+    } else {
+        RainLikelihood.UNKNOWN
+    }
+    val hasConclusion = likelihood != RainLikelihood.UNKNOWN
 
     Column(
         modifier = Modifier
@@ -80,7 +98,7 @@ fun WeatherPage(state: RecorderState) {
         TrendGauge(
             rateHpaPerHour = trend?.rateHpaPerHour ?: 0f,
             grade = trend?.grade ?: TrendGrade.INSUFFICIENT,
-            likelihood = assessment?.likelihood ?: RainLikelihood.UNKNOWN,
+            likelihood = likelihood,
             hasTrend = hasConclusion,
             // 必须给正方形：之前写成「高 104dp + 宽 0.78 屏宽」直接把圆环压成了椭圆。
             // 122dp 正方形在本页纵向余量内。
@@ -100,13 +118,26 @@ fun WeatherPage(state: RecorderState) {
                 )
                 Spacer(Modifier.height(2.dp))
             }
-            // 只放短依据：主屏 189dp 宽，长句会折行并把布局顶乱（完整依据在记录页）
-            Text(
-                text = assessment?.shortReason ?: "样本不足",
-                color = Color(0xFF8A8A8A),
-                fontSize = 9.sp,
-                textAlign = TextAlign.Center,
-            )
+            // 短依据只在「为什么还判断不了」时才显示。
+            // 判断得出来的时候它只是在复述趋势（趋势说「平稳」、原因也写「气压平稳」），
+            // 主人一眼看出这是重复——确然，而且它还占掉了本来能给体感佐证的那一行。
+            if (!hasConclusion) {
+                Text(
+                    text = assessment?.shortReason ?: "样本不足",
+                    color = Color(0xFF8A8A8A),
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
+                )
+            } else if (corroborations.isNotEmpty()) {
+                Text(
+                    text = "体感：" + corroborations.joinToString(" · ") { it.label },
+                    color = Color(0xFFE8C36A),
+                    fontSize = 9.sp,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            // 有结论、又没有佐证时，这里什么都不放：
+            // 短原因的作用只是解释「为什么还判断不了」，判断得出来时它纯属复述评级。
             Spacer(Modifier.height(2.dp))
             Text(
                 text = if (isFast) {

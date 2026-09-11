@@ -46,6 +46,8 @@ data class RecorderState(
      */
     val restingHeartRateBpm: Float? = null,
     val wristTemperatureC: Float? = null,
+    /** 腕温的会话基线（慢速滑动均值）。用于看"偏离了多少"，而不是绝对温度。 */
+    val wristTemperatureBaselineC: Float? = null,
     val lightLux: Float? = null,
     /** 环境光在 10 分钟尺度上的变化（lux）。用于将来分析它与天气的关系，现在只记录。 */
     val lightDelta10Min: Float? = null,
@@ -148,8 +150,14 @@ object PressureRecorder {
     private val samples = ArrayList<PressureSample>(MAX_SAMPLES + 1)
 
     /** 累计的高度偏移（hPa）：所有被引擎判为高度事件的步进之和，跨会话持久化。 */
+    /** 腕温的慢速滑动均值：腕温绝对值没有天气含义，只能与自身基线比较。 */
+    /** 累计的高度偏移（hPa）：所有被引擎判为高度事件的步进之和，跨会话持久化。 */
     private var elevationOffsetHpa = 0f
     private var lastPersistMs = 0L
+
+    /** 腕温的慢速滑动均值：腕温绝对值没有天气含义（环境与衣袖混淆最大），只能与自身基线比较。 */
+    private var wristTempBaseline: Float? = null
+    private var wristTempReadings = 0
 
     // 传感器原始读数
     private var latestPressure: Float? = null
@@ -354,6 +362,14 @@ object PressureRecorder {
                 }
             }
 
+            // 腕温基线：慢速滑动均值。绝对值没有天气含义（环境与衣袖是最大混淆项），
+            // 所以只在攒够读数之后才给出基线，避免刚启动时报出一次假「偏离」。
+            wristTemperature?.let { temperature ->
+                wristTempReadings++
+                val previous = wristTempBaseline
+                wristTempBaseline = if (previous == null) temperature else previous * 0.98f + temperature * 0.02f
+            }
+
             _state.value = _state.value.copy(
                 recording = true,
                 pressureHpa = latestPressure,
@@ -361,6 +377,7 @@ object PressureRecorder {
                 heartRateBpm = currentHeartRate,
                 restingHeartRateBpm = restingBaseline,
                 wristTemperatureC = wristTemperature,
+                wristTemperatureBaselineC = wristTempBaseline?.takeIf { wristTempReadings >= 20 },
                 lightLux = lightLux,
                 lightDelta10Min = lightDelta10Min,
                 elapsedSeconds = (now - startedAtMs) / 1000,

@@ -70,7 +70,9 @@ object WeatherRule {
                 likelihood = RainLikelihood.HIGH,
                 shortReason = "气压急降",
                 advice = "带伞",
-                rationale = "3 小时变压 %.1f hPa，气压在急降，通常对应低压槽或强对流逼近"
+                rationale = "3 小时变压 %.1f hPa，气压在急降，通常对应低压槽或强对流逼近。" +
+                    "（判据来源：气象学「暴风定律」——3 小时降 4 hPa 即风暴前兆；" +
+                    "维基百科亦载气压变化超过 3.5 hPa 时天气变化可期）"
                     .format(trend.deltaHpaPer3h)
             )
 
@@ -85,7 +87,9 @@ object WeatherRule {
             TrendGrade.STEADY -> WeatherAssessment(
                 likelihood = RainLikelihood.LOW,
                 shortReason = "气压平稳",
-                advice = "无变化",
+                // 建议原先写「无变化」——与趋势评级「平稳」是同义重复，主人一眼看出。
+                // 改成行动导向的说法，才配得上占一个 14sp 的位置。
+                advice = "无需带伞",
                 rationale = "3 小时变压 %.1f hPa，气压平稳"
                     .format(trend.deltaHpaPer3h)
             )
