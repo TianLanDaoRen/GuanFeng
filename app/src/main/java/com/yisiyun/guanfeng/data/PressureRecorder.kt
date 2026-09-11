@@ -7,13 +7,17 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.util.Log
 import com.yisiyun.guanfeng.core.HourAccumulator
+import com.yisiyun.guanfeng.core.WeatherRule
 import com.yisiyun.guanfeng.core.HourlyRow
 import com.yisiyun.guanfeng.core.PressureSample
+import com.yisiyun.guanfeng.core.RainLikelihood
 import com.yisiyun.guanfeng.core.PressureTrendEngine
 import com.yisiyun.guanfeng.core.SampleAggregator
 import com.yisiyun.guanfeng.core.TrendResult
 import com.yisiyun.guanfeng.log.CsvSessionLogger
 import com.yisiyun.guanfeng.log.HourlyArchive
+import com.yisiyun.guanfeng.log.PowerLogger
+import com.yisiyun.guanfeng.service.TrendNotifier
 import com.yisiyun.guanfeng.log.SessionHistory
 import kotlin.math.abs
 import kotlin.math.max
@@ -111,9 +115,6 @@ object PressureRecorder {
 
     /** 速评窗口短，绝对量门限必须按比例缩小，否则 5 分钟内永远达不到 0.5 hPa 而恒判「平稳」。 */
     private const val FAST_MIN_ABSOLUTE_DELTA_HPA = 0.15f
-
-    /** 原始文件的时间保护窗：最近这段时间内的会话文件一律不删（个数不等于时间跨度）。 */
-    private const val RETAIN_WINDOW_MS = 6L * 60L * 60L * 1000L
 
     /** 跨会话状态的落盘节奏（不必每条样本都写盘）。 */
     private const val PERSIST_INTERVAL_MS = 5L * 60L * 1000L
@@ -227,13 +228,9 @@ object PressureRecorder {
             }
 
             val restored = runCatching {
-                // 迁移完了再裁剪。原始文件只服务「重启后恢复 3 小时趋势窗口」，
-                // 长期历史已由小时归档承担，所以可以放心删旧文件。
-                // 但个数不等于时间跨度：最近 RETAIN_WINDOW_MS 内的文件一律不删。
-                SessionHistory.pruneOldSessions(
-                    context = applicationContext,
-                    keepSinceMs = startedAtMs - RETAIN_WINDOW_MS,
-                )
+                // 单一文件 + 30MB 上限之后不再需要"删旧文件"：
+                // 采样文件自己会在超限时紧凑化（丢最旧、留最新），
+                // 而小时归档永不删除，长期趋势另有归属。
                 SessionHistory.loadRecent(applicationContext, startedAtMs, WINDOW_MS, MAX_GAP_MS)
             }.getOrElse { error ->
                 Log.w(TAG, "读取历史样本失败: $error")
@@ -489,6 +486,32 @@ object PressureRecorder {
                         context = context,
                         restingHeartRateBpm = restingBaseline,
                         elevationOffsetHpa = elevationOffsetHpa,
+                    )
+                    // 耗电自记录：电量 + 本进程 CPU 时间，供事后归因
+                    PowerLogger.append(
+                        context = context,
+                        appElapsedMs = now - startedAtMs,
+                        samplesLogged = logger?.rowCount ?: 0,
+                    )
+                }
+            }
+
+            // 主动提醒：转坏到「高」时发一条通知（声音与震动交给系统）。
+            // 只在升级时发一次并带冷却，避免变成噪音源——被关掉通知的提醒等于不存在。
+            runCatching {
+                val formalAssessment = WeatherRule.assess(formal)
+                val fastAssessment = WeatherRule.assess(fast)
+                val active = if (formalAssessment.likelihood != RainLikelihood.UNKNOWN) {
+                    formalAssessment to formal
+                } else {
+                    fastAssessment to fast
+                }
+                appContext?.let { context ->
+                    TrendNotifier.maybeNotify(
+                        context = context,
+                        likelihood = active.first.likelihood,
+                        assessment = active.first,
+                        trend = active.second,
                     )
                 }
             }

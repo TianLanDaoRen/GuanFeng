@@ -20,9 +20,16 @@ import java.io.File
  */
 object SessionHistory {
 
-    private const val FILE_PREFIX = "guanfeng_"
-    private const val FILE_SUFFIX = ".csv"
+    private val SAMPLE_FILE = CsvSessionLogger.FILE_NAME
     private const val MAX_ROWS_SCANNED = 20_000
+
+    /**
+     * 恢复历史时只读文件**尾部**这么多字节。
+     *
+     * 单一文件 + 30MB 上限之后，文件可能有十几万行；从头读会白白扫过整周数据。
+     * 尾部 2MB 在 5 秒采样下约合 1.7 万行（≈24 小时），远超 3 小时窗口所需。
+     */
+    private const val TAIL_BYTES = 2L * 1024L * 1024L
     private const val RECORDER_STATE_FILE = "recorder_state.txt"
     private const val KEY_RESTING_HR = "resting_hr"
     private const val KEY_ELEVATION_OFFSET = "elevation_offset_hpa"
@@ -81,84 +88,38 @@ object SessionHistory {
         return collected.toList()
     }
 
-    /**
-     * 裁剪原始会话文件：**保留最近 [keepFiles] 个**（主人的建议）。
-     *
-     * 为什么敢按个数删而不是按天数：长期趋势已经由 [HourlyArchive] 承担，
-     * 那里只存小时汇总、约 1 KB/天、永不删除；原始文件只服务"最近 3 小时趋势窗口"。
-     * 两者职责分开，就不会出现"删文件就没历史"的死结。
-     *
-     * 但**个数不等于时间跨度**：重启频繁时 30 个文件可能不到 3 小时，
-     * 重启后的趋势窗口就会缺一段。所以再加一条硬保护：
-     * [keepSinceMs] 之后的文件**无论多少个都不删**。
-     *
-     * 注意：`hourly.csv` 与 `checkins.csv` 前缀都不是 `guanfeng_`，天然不受影响。
-     */
-    fun pruneOldSessions(
-        context: Context,
-        keepFiles: Int = KEPT_SESSION_FILES,
-        keepSinceMs: Long = 0L,
-    ): Int {
-        if (keepFiles <= 0) return 0
-        val directory = context.getExternalFilesDir(null) ?: context.filesDir
-        val files = directory.listFiles { candidate ->
-            candidate.isFile && candidate.name.startsWith(FILE_PREFIX) &&
-                candidate.name.endsWith(FILE_SUFFIX)
-        }?.sortedByDescending { it.lastModified() } ?: return 0
-        val doomed = selectForDeletion(
-            modifiedTimes = files.map { it.lastModified() },
-            keepFiles = keepFiles,
-            keepSinceMs = keepSinceMs,
-        )
-        return doomed.count { runCatching { files[it].delete() }.getOrDefault(false) }
-    }
-
-    /**
-     * 纯选择逻辑（可单测）：给定按时间**降序**排列的修改时间，返回应删除的下标。
-     * 规则 = 前 keepFiles 个 ∪ 时间晚于 keepSinceMs 的那些。
-     */
-    fun selectForDeletion(
-        modifiedTimes: List<Long>,
-        keepFiles: Int,
-        keepSinceMs: Long,
-    ): List<Int> {
-        val kept = HashSet<Int>()
-        for (index in modifiedTimes.indices) {
-            if (index < keepFiles || (keepSinceMs > 0L && modifiedTimes[index] >= keepSinceMs)) {
-                kept += index
-            }
-        }
-        return modifiedTimes.indices.filter { it !in kept }
-    }
-
-    /** 从磁盘恢复：按修改时间从新到旧读会话文件，凑满窗口即停。 */
+    /** 从唯一文件尾部恢复最近一段样本（供 3 小时趋势窗口续接）。 */
     fun loadRecent(
         context: Context,
         nowMs: Long,
         windowMs: Long,
         maxGapMs: Long,
     ): List<PressureSample> {
-        val directory = context.getExternalFilesDir(null) ?: context.filesDir
-        val files = directory.listFiles { file ->
-            file.isFile && file.name.startsWith(FILE_PREFIX) && file.name.endsWith(FILE_SUFFIX)
-        }?.sortedByDescending { it.lastModified() } ?: return emptyList()
-
-        val collected = ArrayList<PressureSample>()
-        for (file in files) {
-            val parsed = runCatching { readCapped(file) }.getOrElse { emptyList() }
-            collected += parsed
-            val oldest = collected.minOfOrNull { it.timestampMs } ?: continue
-            if (nowMs - oldest <= windowMs) break
-        }
+        val file = sampleFile(context)
+        if (!file.isFile) return emptyList()
+        val collected = runCatching { readTail(file) }.getOrElse { emptyList() }
         return tailWithoutGaps(collected, nowMs, windowMs, maxGapMs)
     }
 
-    private fun readCapped(file: File): List<PressureSample> {
+    /** 唯一采样文件。 */
+    fun sampleFile(context: Context): File {
+        val directory = context.getExternalFilesDir(null) ?: context.filesDir
+        return File(directory, SAMPLE_FILE)
+    }
+
+    /** 从文件尾部读若干字节并解析（跳过可能被切断的首行）。 */
+    private fun readTail(file: File, maxBytes: Long = TAIL_BYTES): List<PressureSample> {
         val lines = ArrayList<String>()
-        file.bufferedReader().useLines { sequence ->
-            for (line in sequence) {
-                lines += line
-                if (lines.size >= MAX_ROWS_SCANNED) break
+        file.inputStream().use { input ->
+            val channel = input.channel
+            val size = channel.size()
+            val startAt = (size - maxBytes).coerceAtLeast(0L)
+            channel.position(startAt)
+            val text = input.reader(Charsets.UTF_8).readText()
+            val usable = if (startAt > 0L) text.substringAfter('\n', text) else text
+            usable.lineSequence().forEach { line ->
+                if (line.isNotBlank()) lines += line
+                if (lines.size >= MAX_ROWS_SCANNED) return@forEach
             }
         }
         return parse(lines)
@@ -180,10 +141,8 @@ object SessionHistory {
         val directory = context.getExternalFilesDir(null) ?: context.filesDir
         val cutoff = if (days >= ALL_HISTORY_DAYS) 0L
         else nowMs - days.toLong() * 24 * 60 * 60 * 1000
-        val files = directory.listFiles { file ->
-            file.isFile && file.name.startsWith(FILE_PREFIX) && file.name.endsWith(FILE_SUFFIX) &&
-                file.lastModified() >= cutoff
-        }?.sortedBy { it.lastModified() } ?: return emptyList()
+        val single = File(directory, SAMPLE_FILE)
+        val files = if (single.isFile && single.lastModified() >= cutoff) listOf(single) else emptyList()
 
         val accumulator = com.yisiyun.guanfeng.core.HourlyAccumulator()
         for (file in files) {
@@ -220,9 +179,6 @@ object SessionHistory {
     /** 传这个天数表示「全部可用历史」，不受时间窗裁剪。 */
     const val ALL_HISTORY_DAYS = 100_000
 
-    /** 原始会话文件保留数量：只服务最近 3 小时趋势窗口，30 个绰绰有余。 */
-    const val KEPT_SESSION_FILES = 30
-
     /** 读取最近一段时间的**原始环境光**读数，用于启动时立刻恢复光照趋势。 */
     fun loadRecentLight(
         context: Context,
@@ -230,10 +186,7 @@ object SessionHistory {
         nowMs: Long,
     ): List<Pair<Long, Float>> {
         val directory = context.getExternalFilesDir(null) ?: context.filesDir
-        val file = directory.listFiles { candidate ->
-            candidate.isFile && candidate.name.startsWith(FILE_PREFIX) &&
-                candidate.name.endsWith(FILE_SUFFIX)
-        }?.maxByOrNull { it.lastModified() } ?: return emptyList()
+        val file = File(directory, SAMPLE_FILE).takeIf { it.isFile } ?: return emptyList()
 
         return runCatching {
             file.bufferedReader().useLines { sequence ->

@@ -21,6 +21,20 @@ import androidx.compose.ui.unit.sp
 import com.yisiyun.guanfeng.core.TrendConfidence
 import com.yisiyun.guanfeng.core.WeatherRule
 import com.yisiyun.guanfeng.data.RecorderState
+import com.yisiyun.guanfeng.log.WeatherObservationLogger
+import com.yisiyun.guanfeng.log.WeatherObservation
+import com.yisiyun.guanfeng.core.RainLikelihood
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 
 /**
  * 第四屏 · 记录：这一屏存在的意义是让「它到底有没有在记」一眼可见、可以自己验证。
@@ -30,8 +44,12 @@ import com.yisiyun.guanfeng.data.RecorderState
  */
 @Composable
 fun RecordPage(state: RecorderState) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val trend = state.trend
     val rationale = trend?.let { WeatherRule.assess(it).rationale }
+    var observedToday by remember { mutableStateOf(WeatherObservationLogger.countToday(context)) }
+    var observeFeedback by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
@@ -85,6 +103,52 @@ fun RecordPage(state: RecorderState) {
                 lineHeight = 11.sp,
             )
         }
+
+        Spacer(Modifier.height(6.dp))
+        // 天气实况：校准唯一的数据来源。
+        // 记录实况的**同时**把当时的判断一并落盘，之后才能直接算命中率与漏报率。
+        Text("天气实况（供校准）", color = Color(0xFF6EE7A8), fontSize = 9.sp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            WeatherObservation.entries.forEach { observation ->
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(30.dp)
+                        .background(Color(0xFF1E2A22), RoundedCornerShape(15.dp))
+                        .clickable {
+                            val assessment = trend?.let { WeatherRule.assess(it) }
+                            val written = WeatherObservationLogger.append(
+                                context = context,
+                                observation = observation,
+                                weatherPressureHpa = state.weatherPressureHpa,
+                                trend = trend,
+                                likelihood = assessment?.likelihood ?: RainLikelihood.UNKNOWN,
+                            )
+                            if (written) {
+                                observedToday = WeatherObservationLogger.countToday(context)
+                                observeFeedback = "已记 ${observation.label}"
+                            } else {
+                                observeFeedback = "写入失败"
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(observation.label, color = Color(0xFFCFE8D8), fontSize = 10.sp)
+                }
+            }
+        }
+        Text(
+            text = if (observeFeedback.isNotEmpty()) {
+                "$observeFeedback · 今日 $observedToday 次"
+            } else {
+                "今日 $observedToday 次 · 下雨/起风时随手点一下"
+            },
+            color = Color(0xFF6E6E6E),
+            fontSize = 7.sp,
+        )
 
         Spacer(Modifier.height(6.dp))
         Text(

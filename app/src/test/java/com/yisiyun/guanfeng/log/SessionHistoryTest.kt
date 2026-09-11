@@ -110,49 +110,4 @@ class SessionHistoryTest {
         assertEquals(2, tail.size)
         assertEquals(1002f, tail[0].pressureHpa, 1e-6f)
     }
-
-    // ---- 原始文件保留策略 ----
-
-    @Test
-    fun `保留最近 N 个文件_更旧的删掉`() {
-        // 修改时间按降序传入（与调用方一致）
-        val times = (0 until 50).map { 1_000_000L - it * 1000L }
-
-        val doomed = SessionHistory.selectForDeletion(times, keepFiles = 30, keepSinceMs = 0L)
-
-        assertEquals(20, doomed.size)
-        assertTrue("删的必须是最旧的 20 个", doomed.all { it >= 30 })
-    }
-
-    @Test
-    fun `个数不等于时间跨度_时间保护窗内的文件一律不删`() {
-        // 模拟"重启极频繁"：40 个文件全挤在最近两小时内
-        val now = 2_000_000_000L
-        val times = (0 until 40).map { now - it * 60_000L }
-
-        val doomed = SessionHistory.selectForDeletion(
-            modifiedTimes = times,
-            keepFiles = 30,
-            keepSinceMs = now - 6L * 60 * 60 * 1000,
-        )
-
-        assertTrue("全在保护窗内，一个都不该删", doomed.isEmpty())
-    }
-
-    @Test
-    fun `保护窗与个数规则取并集`() {
-        val now = 2_000_000_000L
-        // 前 35 个是旧文件（30 分钟前以前），后 5 个是刚才的
-        val times = (0 until 35).map { now - 10L * 60 * 60 * 1000 - it * 60_000L } +
-            (0 until 5).map { now - it * 60_000L }
-
-        val doomed = SessionHistory.selectForDeletion(
-            modifiedTimes = times,
-            keepFiles = 30,
-            keepSinceMs = now - 6L * 60 * 60 * 1000,
-        )
-
-        assertEquals("前 30 个受个数保护、后 5 个受时间保护，删中间那 5 个", 5, doomed.size)
-        assertTrue(doomed.all { it in 30..34 })
-    }
 }
