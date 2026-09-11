@@ -27,6 +27,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -230,7 +232,7 @@ fun AssociationPage(state: RecorderState) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("关联", color = Color(0xFFB79CE8), fontSize = 11.sp)
                 Spacer(Modifier.fillMaxWidth(0.1f))
-                Text("近 $PERIOD_DAYS 天", color = Color(0xFF6E6E6E), fontSize = 8.sp)
+                Text("曲线近 24 小时 · 统计近 $PERIOD_DAYS 天", color = Color(0xFF6E6E6E), fontSize = 7.sp)
             }
 
             if (loading || current == null) {
@@ -246,16 +248,19 @@ fun AssociationPage(state: RecorderState) {
             } else {
                 PressureCheckInChart(
                     hourly = current.hourly,
-                    checkIns = checkIns.filter {
-                        it.timestampMs >= current.hourly.first().hourStartMs
-                    },
-                    periodDays = PERIOD_DAYS,
-                    modifier = Modifier.fillMaxWidth().height(94.dp),
+                    checkIns = checkIns,
+                    nowMs = System.currentTimeMillis(),
+                    modifier = Modifier.fillMaxWidth().height(96.dp),
                 )
                 Text(
                     text = "打卡 ${current.checkInCount} 次 · 气压大变化日 ${current.bigSwingDays} 天",
                     color = Color(0xFFD0D0D0),
                     fontSize = 9.sp,
+                )
+                Text(
+                    text = "青线＝气压（已去高度） · 黄点＝打卡",
+                    color = Color(0xFF5E6A72),
+                    fontSize = 7.sp,
                 )
                 val overlap = current.overlapRatio
                 Text(
@@ -461,59 +466,142 @@ private fun ReportOverlay(
     }
 }
 
-/** 气压小时曲线 + 打卡点。空洞处断开折线，不假装数据连续。 */
+/**
+ * 气压曲线 + 打卡点。
+ *
+ * ## 这次重画解决了三个问题（都由主人指出）
+ *
+ * 1. **横轴原先根本没有时间含义**：`fromMs` 取第一个小时桶、`toMs = fromMs + 7 天`，
+ *    而数据只覆盖最新的一小段——于是整条线被挤在横轴最左边 2~6%，形状完全读不出来。
+ *    现在横轴是**真实时间窗**：`[现在 − 24 小时, 现在]`。
+ *
+ * 2. **纵轴按数据 min/max 自动拉伸**，0.3 hPa 的微小起伏会被拉满整屏高度、看着像大山。
+ *    现在给纵轴设**最小量程 1.0 hPa**，并把上下限的数值直接标出来——
+ *    一眼就能看出"这条线其实只动了 0.3 hPa"。
+ *
+ * 3. **画的是"去掉高度"的天气分量，而第一页显示的是原始气压**，两者本就不同
+ *    （你在屋里走动会改变手腕高度，原始值随之变）。图例里写明，避免把两个数当成一个。
+ */
 @Composable
 private fun PressureCheckInChart(
     hourly: List<HourlyBucket>,
     checkIns: List<CheckInRecord>,
-    periodDays: Int,
+    nowMs: Long,
     modifier: Modifier = Modifier,
 ) {
-    Canvas(modifier = modifier) {
-        val fromMs = hourly.first().hourStartMs
-        val toMs = fromMs + periodDays.toLong() * 24 * 60 * 60 * 1000
-        val minPressure = hourly.minOf { it.minHpa }
-        val maxPressure = hourly.maxOf { it.maxHpa }
-        val span = (maxPressure - minPressure).coerceAtLeast(1f)
+    val fromMs = nowMs - CHART_WINDOW_HOURS * 3_600_000L
+    // 多留一个桶，免得最新的那个小时因为边界被切掉
+    val visible = hourly.filter { it.hourStartMs >= fromMs - 3_600_000L }
+    if (visible.isEmpty()) return
 
-        fun xOf(timestampMs: Long): Float =
-            ((timestampMs - fromMs).toFloat() / (toMs - fromMs)) * size.width
+    val dataMin = visible.minOf { it.minHpa }
+    val dataMax = visible.maxOf { it.maxHpa }
+    val mid = (dataMin + dataMax) / 2f
+    // 最小量程：防止微小起伏被拉成大山的唯一手段
+    val span = (dataMax - dataMin).coerceAtLeast(MIN_SPAN_HPA)
+    val low = mid - span / 2f
+    val high = mid + span / 2f
 
-        fun yOf(pressure: Float): Float =
-            size.height - ((pressure - minPressure) / span) * size.height
+    Column(modifier = modifier) {
+        Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                fun xOf(timestampMs: Long): Float =
+                    ((timestampMs - fromMs).toFloat() / (nowMs - fromMs)) * size.width
 
-        val path = Path()
-        var started = false
-        hourly.forEachIndexed { index, bucket ->
-            val px = xOf(bucket.hourStartMs)
-            val py = yOf(bucket.avgHpa)
-            val continuous = index == 0 ||
-                bucket.hourStartMs - hourly[index - 1].hourStartMs <= 2L * 60 * 60 * 1000
-            if (!continuous) started = false
-            if (!started) {
-                path.moveTo(px, py)
-                started = true
-            } else {
-                path.lineTo(px, py)
+                fun yOf(pressure: Float): Float =
+                    size.height - ((pressure - low) / span) * size.height
+
+                // 暗色底 + 淡网格：有参照才看得出量级
+                drawRoundRect(
+                    color = Color(0xFF101418),
+                    cornerRadius = CornerRadius(6f, 6f),
+                    size = size,
+                )
+                val gridColor = Color(0xFF232A31)
+                for (row in 1..3) {
+                    val y = size.height * row / 4f
+                    drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+                }
+                for (col in 1..3) {
+                    val x = size.width * col / 4f
+                    drawLine(gridColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
+                }
+
+                // 折线：仅在相邻小时连续时才连线（超 2 小时视为断档）
+                val path = Path()
+                var started = false
+                visible.forEachIndexed { index, bucket ->
+                    val px = xOf(bucket.hourStartMs)
+                    val py = yOf(bucket.avgHpa)
+                    val continuous = index == 0 ||
+                        bucket.hourStartMs - visible[index - 1].hourStartMs <= 2L * 3_600_000L
+                    if (!continuous) started = false
+                    if (!started) {
+                        path.moveTo(px, py)
+                        started = true
+                    } else {
+                        path.lineTo(px, py)
+                    }
+                }
+                drawPath(path = path, color = Color(0xFF7FD1E8), style = Stroke(width = 2.2f))
+
+                // 打卡点：落在当时的气压高度上
+                checkIns.forEach { record ->
+                    if (record.timestampMs < fromMs) return@forEach
+                    val pressure = record.chartPressureHpa ?: visible
+                        .firstOrNull {
+                            it.hourStartMs == HourlyAccumulator.floorToHour(record.timestampMs)
+                        }
+                        ?.avgHpa
+                        ?: return@forEach
+                    val center = Offset(xOf(record.timestampMs), yOf(pressure))
+                    drawCircle(Color(0xFFE8C36A), radius = 3.6f, center = center)
+                    drawCircle(Color(0xFF1A1408), radius = 1.4f, center = center)
+                }
             }
-        }
-        drawPath(path = path, color = Color(0xFF7FD1E8), style = Stroke(width = 2f))
 
-        checkIns.forEach { record ->
-            // 优先用解耦掉高度后的天气气压：否则坐完电梯再打卡，
-            // 点会落在被高度污染的高度上，看起来像「气压骤降时不适」。
-            val pressure = record.chartPressureHpa ?: hourly
-                .firstOrNull { it.hourStartMs == HourlyAccumulator.floorToHour(record.timestampMs) }
-                ?.avgHpa
-                ?: return@forEach
-            drawCircle(
-                color = Color(0xFFE8C36A),
-                radius = 3.2f,
-                center = Offset(xOf(record.timestampMs), yOf(pressure)),
+            // 纵轴上下限：把量程直接摆在图上，是"别把小起伏看成大山"的关键
+            Text(
+                text = "%.1f".format(high),
+                color = Color(0xFF6E6E6E),
+                fontSize = 7.sp,
+                modifier = Modifier.align(Alignment.TopStart).padding(start = 3.dp, top = 2.dp),
             )
+            Text(
+                text = "%.1f".format(low),
+                color = Color(0xFF6E6E6E),
+                fontSize = 7.sp,
+                modifier = Modifier.align(Alignment.BottomStart).padding(start = 3.dp, bottom = 2.dp),
+            )
+        }
+
+        // 横轴时刻：四等分处标出真实钟点
+        Row(modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) {
+            for (mark in 0..3) {
+                val ts = fromMs + (nowMs - fromMs) * mark / 3
+                val label = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+                    .format(java.util.Date(ts))
+                Text(
+                    text = if (mark == 3) "现在" else label,
+                    color = Color(0xFF6E6E6E),
+                    fontSize = 6.sp,
+                    textAlign = when (mark) {
+                        0 -> TextAlign.Start
+                        3 -> TextAlign.End
+                        else -> TextAlign.Center
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
 }
+
+/** 图画的时间窗：24 小时够看完一场天气过程，也远大于最小量程带来的可读性需求。 */
+private const val CHART_WINDOW_HOURS = 24
+
+/** 纵轴最小量程（hPa）：低于它就把刻度拉开放大，避免噪声被画成大山。 */
+private const val MIN_SPAN_HPA = 1.0f
 
 /** 一次读取算出的两段口径与体感归档。 */
 private data class ComputedAssociation(
