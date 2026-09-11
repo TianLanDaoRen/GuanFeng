@@ -31,6 +31,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yisiyun.guanfeng.data.CheckInLogger
+import com.yisiyun.guanfeng.data.CheckInSignal
 import com.yisiyun.guanfeng.data.RecorderState
 import kotlinx.coroutines.delay
 
@@ -172,6 +173,8 @@ fun CheckInPage(state: RecorderState) {
                     )
                     todayCount = logger.countToday()
                     feedback = if (written) {
+                        // 广播出去：关联视图要立刻把新点画上，不必等缓存过期
+                        if (written) CheckInSignal.notifyRecorded()
                         "已记录 $selectedTag · $selectedIntensity"
                     } else {
                         "写入失败"

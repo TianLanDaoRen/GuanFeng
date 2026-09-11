@@ -13,6 +13,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
     <!-- Android 13+ 才需要运行时申请；API 30 设备上为无害声明 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!--
+      联网仅用于「AI 报告」这一项可选功能（用户显式点按钮并在弹窗确认后才会发起）。
+      核心功能——气压趋势、高度解耦、打卡、关联视图——全部离线，不依赖此权限。
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:allowBackup="true"
