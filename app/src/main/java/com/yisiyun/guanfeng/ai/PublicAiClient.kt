@@ -125,7 +125,19 @@ object PublicAiClient {
                 }
             ),
         )
-        put("generationConfig", JSONObject().put("temperature", 0.7))
+        put(
+            "generationConfig",
+            JSONObject().apply {
+                put("temperature", 0.7)
+                // 思考力度拉到 high（主人要求）：Gemini 3 代际用 thinkingLevel。
+                // 已实测中继接受该字段且不报错；若将来模型换代导致字段不认，
+                // 服务端一般会忽略未知字段而不是报错，不会让整次请求失败。
+                put("thinkingConfig", JSONObject().put("thinkingLevel", "high"))
+                // 思考会占用输出预算，所以显式给足；不设则由服务端默认，
+                // 在 high 思考下可能把正文挤掉。
+                put("maxOutputTokens", 4096)
+            },
+        )
     }.toString()
 
     private fun extractText(frame: JSONObject): String? =

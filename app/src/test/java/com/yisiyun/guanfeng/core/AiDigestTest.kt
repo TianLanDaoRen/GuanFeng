@@ -95,7 +95,8 @@ class AiDigestTest {
 
         assertTrue("禁止医学结论", prompt.contains("禁止任何医学诊断"))
         assertTrue("必须点明样本量小", prompt.contains("样本量很小"))
-        assertTrue("限定篇幅", prompt.contains("200 字以内"))
+        assertTrue("不再限定字数（主人要求放开篇幅）", prompt.contains("不限制字数"))
+        assertTrue("要求温和但专业", prompt.contains("温和") && prompt.contains("专业"))
         assertTrue("禁止表格与代码块（腕上放不下）", prompt.contains("不要使用表格、代码块"))
         assertTrue("要求分两段口径作答", prompt.contains("all_history"))
         assertTrue(prompt.contains("recent_7_days"))
