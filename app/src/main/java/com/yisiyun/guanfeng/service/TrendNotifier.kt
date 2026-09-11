@@ -131,6 +131,31 @@ object TrendNotifier {
     }.getOrDefault(false)
 
     /**
+     * 诊断：通知到底有没有被系统允许。
+     *
+     * 加它的原因很实际：主人点了两次测试提醒都没看见通知，而"通知被禁"与
+     * "通知发了但没弹"是两种完全不同的故障，界面上必须能区分，
+     * 否则只能靠猜——那是最浪费时间的排查方式。
+     */
+    fun diagnose(context: Context): String {
+        val enabled = runCatching {
+            androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
+        }.getOrDefault(true)
+        if (!enabled) return "通知已被系统关闭 ⚠ 请到设置里为本应用打开通知"
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val channel = manager?.getNotificationChannel(CHANNEL_ID)
+        val importance = when (channel?.importance) {
+            NotificationManager.IMPORTANCE_HIGH -> "横幅"
+            NotificationManager.IMPORTANCE_DEFAULT -> "普通"
+            NotificationManager.IMPORTANCE_LOW -> "静音"
+            NotificationManager.IMPORTANCE_MIN -> "最低"
+            null -> "渠道未创建"
+            else -> "其它"
+        }
+        return "通知已允许 · 渠道 $importance"
+    }
+
+    /**
      * 手动发一条测试通知。
      *
      * 存在的理由：真实触发条件（倾向升到「高」）可能要等好几天才遇到一次，

@@ -8,9 +8,11 @@ import org.junit.Test
 /**
  * AI 上报摘要的单测。
  *
- * 最重要的一条是**隐私边界**：摘要里绝不能出现逐条原始记录
- * （备注原文、逐条时间戳、体征逐点值）。这条一旦破了，
- * 「只发聚合统计」的承诺就是假的。
+ * 隐私边界已按主人的判断调整：**备注原文要发**。
+ * 理由：标签只能归成六类，而"起床后右侧发紧"这种手写描述才包含可分析的细节，
+ * 挡掉它等于让 AI 失去最有用的一路输入。是否上传由用户在同意弹窗里决定，
+ * 而不是由代码替他决定。
+ * 仍然不发的是：设备标识、用户身份、体征逐点读数（那些既无用也无必要）。
  */
 class AiDigestTest {
 
@@ -31,7 +33,7 @@ class AiDigestTest {
     }
 
     @Test
-    fun `摘要里绝不能出现逐条原始记录`() {
+    fun `备注原文必须发出_它是最有分析价值的输入`() {
         val record = CheckInRecord(
             timestampMs = 20_454L * day - offset + 3 * hour,
             tags = "头痛",
@@ -42,10 +44,11 @@ class AiDigestTest {
         val summary = summaryWith(listOf(record))
         val digest = AiDigest.build(summary, summary, listOf(record), offset)
 
-        assertFalse("备注原文不能出现在上报摘要里", digest.contains("起床后右侧发紧"))
-        assertFalse("不应出现逐条打卡时间戳", digest.contains(record.timestampMs.toString()))
-        assertTrue("但聚合计数必须带上", digest.contains("\"check_in_count\":1"))
-        assertTrue("标签分布要带上", digest.contains("\"头痛\":1"))
+        assertTrue("备注原文必须带上——那才是可分析的细节", digest.contains("起床后右侧发紧"))
+        assertTrue("逐条明细要能对上时间", digest.contains(record.timestampMs.toString()))
+        assertTrue("聚合计数仍然保留", digest.contains("\"check_in_count\":1"))
+        assertTrue("标签分布仍然保留", digest.contains("\"头痛\":1"))
+        assertTrue("明细里要有 note 字段", digest.contains("\"note\":\"起床后右侧发紧\""))
     }
 
     @Test

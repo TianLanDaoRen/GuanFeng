@@ -47,6 +47,28 @@ object AiDigest {
         builder.append("\"check_in_tags\":").append(countObject(tagCounts))
         builder.append(',')
         builder.append("\"check_in_intensity\":").append(countObject(intensityCounts))
+        // 逐条打卡明细（含手写备注原文）。
+        // 曾经这里刻意不发备注，理由是"保护隐私"——但那是错的判断：
+        // 标签只能归成六类，而"起床后右侧发紧"这种手写描述才包含可分析的细节，
+        // 挡掉它等于让 AI 失去最有用的一路输入。是否上传由用户在同意弹窗里决定。
+        if (checkIns.isNotEmpty()) {
+            builder.append(",\"check_in_detail\":[")
+            builder.append(
+                checkIns.joinToString(",") { record ->
+                    buildString {
+                        append("{\"t\":").append(record.timestampMs)
+                        append(",\"tag\":\"").append(escape(record.tags)).append('"')
+                        append(",\"intensity\":\"").append(escape(record.intensity)).append('"')
+                        record.chartPressureHpa?.let { append(",\"pressure\":%.1f".format(it)) }
+                        if (record.note.isNotBlank()) {
+                            append(",\"note\":\"").append(escape(record.note)).append('"')
+                        }
+                        append('}')
+                    }
+                }
+            )
+            builder.append(']')
+        }
         if (hourlyRows.isNotEmpty()) {
             builder.append(',')
             builder.append("\"body_context\":").append(bodyContext(hourlyRows, recentFromMs))
@@ -161,7 +183,9 @@ object AiDigest {
         3. 中文，200 字以内，分三段：全局（all_history）观察 / 近期（recent_7_days）观察 /
            一条可执行的建议。若两段样本量差异大，点明哪一段更可靠。
         4. 不要使用表格、代码块或长列表——阅读终端是一块很小的手表屏幕。
-        5. `body_context` 是**用来排除混淆因素**的：例如头痛若同时伴随腕温升高，
+        5. `check_in_detail` 里带用户手写的 `note`，那是他与身体感受最直接的描述，
+           请把它当作主要文本证据（标签只是归类）；
+        6. `body_context` 是**用来排除混淆因素**的：例如头痛若同时伴随腕温升高，
            发热就是不能排除的解释；若心跳与体温都正常，则气压变化的解释相对更强。
            提到体感数据时要说明其局限（腕温受环境与衣袖影响）。
     """.trimIndent()

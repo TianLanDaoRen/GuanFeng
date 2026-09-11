@@ -106,10 +106,14 @@ fun CheckInPage(state: RecorderState) {
                     pair.forEach { tag ->
                         Chip(
                             label = tag,
-                            selected = selectedTag == tag,
+                            // 备注里写了自定义内容时，预制标签一律不高亮——
+                            // 二者互斥：要么选一个预设，要么自己写。
+                            selected = note.isBlank() && selectedTag == tag,
                             modifier = Modifier.weight(1f),
                             onClick = {
+                                // 点预设＝改主意，清掉自定义内容（最后一次操作生效）
                                 selectedTag = tag
+                                note = ""
                                 Log.i(TAG, "选中症状 $tag")
                             },
                         )
@@ -135,19 +139,34 @@ fun CheckInPage(state: RecorderState) {
             }
         }
 
+        // 自定义备注：与预制标签互斥。一旦写入内容，标签自动取消选中、
+        // 本输入框描边高亮，记录时"标签"位置就记成这段自定义内容。
+        // 主人要的正是这个：标签只能归六类，而"起床后右侧发紧"这种描述才是 AI 能分析的细节。
+        val noteActive = note.isNotBlank()
         BasicTextField(
             value = note,
-            onValueChange = { note = it },
+            onValueChange = { text ->
+                note = text
+                if (text.isNotBlank()) selectedTag = ""
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(22.dp)
-                .background(Color(0xFF191919), RoundedCornerShape(6.dp))
+                .background(
+                    color = if (noteActive) Color(0xFF1B2A38) else Color(0xFF191919),
+                    shape = RoundedCornerShape(6.dp),
+                )
+                .border(
+                    width = if (noteActive) 1.dp else 0.dp,
+                    color = if (noteActive) Color(0xFF7FD1E8) else Color.Transparent,
+                    shape = RoundedCornerShape(6.dp),
+                )
                 .padding(horizontal = 6.dp, vertical = 3.dp),
             textStyle = TextStyle(color = Color.White, fontSize = 10.sp),
             singleLine = true,
             decorationBox = { inner ->
                 if (note.isEmpty()) {
-                    Text("备注（可选）", color = Color(0xFF5E5E5E), fontSize = 9.sp)
+                    Text("自定义（可选）", color = Color(0xFF5E5E5E), fontSize = 9.sp)
                 }
                 inner()
             },
@@ -160,9 +179,12 @@ fun CheckInPage(state: RecorderState) {
                 .background(Color(0xFF2A5F8F), RoundedCornerShape(16.dp))
                 .clickable {
                     Log.i(TAG, "打卡按钮被点击：$selectedTag · $selectedIntensity · note=「$note」")
+                    // 有自定义内容时，它同时充当标签：这样关联图/报告里的分类
+                    // 就是你真正写的那个说法，而不是被硬塞进六个预设之一。
+                    val recordedTag = if (note.isNotBlank()) note.trim() else selectedTag
                     val written = logger.append(
                         timestampMs = System.currentTimeMillis(),
-                        tags = selectedTag,
+                        tags = recordedTag,
                         intensity = selectedIntensity,
                         note = note,
                         pressureHpa = state.pressureHpa,
@@ -175,8 +197,8 @@ fun CheckInPage(state: RecorderState) {
                     todayCount = logger.countToday()
                     feedback = if (written) {
                         // 广播出去：关联视图要立刻把新点画上，不必等缓存过期
-                        if (written) CheckInSignal.notifyRecorded()
-                        "已记录 $selectedTag · $selectedIntensity"
+                        CheckInSignal.notifyRecorded()
+                        "已记录 $recordedTag · $selectedIntensity"
                     } else {
                         "写入失败"
                     }

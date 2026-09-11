@@ -23,6 +23,8 @@ import com.yisiyun.guanfeng.core.WeatherRule
 import com.yisiyun.guanfeng.data.RecorderState
 import com.yisiyun.guanfeng.log.WeatherObservation
 import com.yisiyun.guanfeng.service.TrendNotifier
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import com.yisiyun.guanfeng.core.RainLikelihood
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.setValue
@@ -116,8 +118,14 @@ fun RecordPage(state: RecorderState) {
                 .height(30.dp)
                 .background(Color(0xFF2A2A1E), RoundedCornerShape(15.dp))
                 .clickable {
-                    TrendNotifier.sendTestNotification(context)
-                    noticeFeedback = "已发测试通知"
+                    // 延迟 5 秒再发：应用在前台时通知横幅没有地方可画，
+                    // 主人也看不到通知栏。给 5 秒退回表盘，才能验证真实呈现。
+                    noticeFeedback = "5 秒后发送，请退回表盘"
+                    scope.launch {
+                        delay(5_000)
+                        TrendNotifier.sendTestNotification(context)
+                        noticeFeedback = "已发送 · " + TrendNotifier.diagnose(context)
+                    }
                 },
             contentAlignment = Alignment.Center,
         ) {
@@ -127,7 +135,7 @@ fun RecordPage(state: RecorderState) {
             text = if (noticeFeedback.isNotEmpty()) {
                 noticeFeedback
             } else {
-                "验证通知能否弹出、是否按系统设置响铃震动"
+                "5 秒后发送（便于退回表盘查看）· " + TrendNotifier.diagnose(context)
             },
             color = Color(0xFF6E6E6E),
             fontSize = 7.sp,

@@ -337,10 +337,10 @@ private fun ConsentOverlay(onCancel: () -> Unit, onConfirm: () -> Unit) {
         Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Text(
                 text = "将上传：" + "\n" +
-                    "· 气压与打卡的统计（天数、极值、次数、标签分布）" + "\n" +
-                    "· 心率 / 腕温 / 光照的小时级统计" + "\n\n" +
+                    "· 气压与体感的小时级统计" + "\n" +
+                    "· 你的打卡记录（含手写备注原文）与天气实况" + "\n\n" +
                     "不会上传：" + "\n" +
-                    "逐条打卡记录、备注原文、体征逐点读数、任何身份标识。",
+                    "设备标识、账号身份、体征逐点读数。",
                 color = Color(0xFFC8C8C8),
                 fontSize = 9.sp,
                 lineHeight = 13.sp,
