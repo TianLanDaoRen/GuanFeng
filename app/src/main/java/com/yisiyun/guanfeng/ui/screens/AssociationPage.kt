@@ -501,11 +501,18 @@ private fun PressureCheckInChart(
 
     val dataMin = visible.minOf { it.minHpa }
     val dataMax = visible.maxOf { it.maxHpa }
-    val mid = (dataMin + dataMax) / 2f
-    // 最小量程：防止微小起伏被拉成大山的唯一手段
-    val span = (dataMax - dataMin).coerceAtLeast(MIN_SPAN_HPA)
-    val low = mid - span / 2f
-    val high = mid + span / 2f
+    // 纵轴自动贴合数据：让最低点与最高点几乎占满整条纵轴（主人要求）。
+    //
+    // 我上一轮给纵轴设了 1.0 hPa 的最小量程，理由是"防止微小起伏被画成大山"——
+    // 但那个顾虑是多余的：**把上下限的数值标在图上，量级自然就交代清楚了**；
+    // 而固定最小量程的副作用是真实跨度一大（比如天气过程里的 12 hPa）曲线就被压扁，
+    // 什么也读不出来。宁可让分辨率最大化、由数字说明量级。
+    //
+    // 仍然保留一个极小的下限，只为了避免"数据完全平坦时除零"这种退化情形。
+    val span = (dataMax - dataMin).coerceAtLeast(DEGENERATE_SPAN_HPA)
+    val pad = span * 0.05f
+    val low = dataMin - pad
+    val high = dataMax + pad
 
     Column(modifier = modifier) {
         Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
@@ -605,8 +612,11 @@ private fun PressureCheckInChart(
 /** 图画的时间窗：24 小时够看完一场天气过程，也远大于最小量程带来的可读性需求。 */
 private const val CHART_WINDOW_HOURS = 24
 
-/** 纵轴最小量程（hPa）：低于它就把刻度拉开放大，避免噪声被画成大山。 */
-private const val MIN_SPAN_HPA = 1.0f
+/**
+ * 纵轴的退化下限（hPa）：只在数据完全平坦时兜底，避免除零。
+ * 它**不再承担"限制分辨率"的职责**——分辨率交给数据本身，量级交给轴上的数字。
+ */
+private const val DEGENERATE_SPAN_HPA = 0.2f
 
 /** 一次读取算出的两段口径与体感归档。 */
 private data class ComputedAssociation(
