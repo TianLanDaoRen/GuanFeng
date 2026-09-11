@@ -254,6 +254,9 @@ object PressureRecorder {
                         applicationContext,
                         SessionHistory.ALL_HISTORY_DAYS,
                         startedAtMs,
+                        // 只迁移带天气分量的行：老数据的原始气压含高度变化，
+                        // 混进归档会污染"气压大变化日"统计（宁可少一段历史）
+                        onlyDecoupled = true,
                     ),
                 )
                 if (seeded > 0) Log.i(TAG, "小时归档迁移：从原始文件补齐 $seeded 个小时")

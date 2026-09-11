@@ -499,8 +499,12 @@ private fun PressureCheckInChart(
     val visible = hourly.filter { it.hourStartMs >= fromMs - 3_600_000L }
     if (visible.isEmpty()) return
 
-    val dataMin = visible.minOf { it.minHpa }
-    val dataMax = visible.maxOf { it.maxHpa }
+    // 必须用**画出来的那个量**（小时均值 avgHpa）来定纵轴范围。
+    // 原先用的是每小时的 min/max——那是另一个量，它被单小时内的极值撑开，
+    // 而曲线画的却是均值，于是曲线永远只占纵轴一小截（主人两次截图都在问这件事）。
+    // 教训：**轴的取值口径必须与图形的取值口径完全一致。**
+    val dataMin = visible.minOf { it.avgHpa }
+    val dataMax = visible.maxOf { it.avgHpa }
     // 纵轴自动贴合数据：让最低点与最高点几乎占满整条纵轴（主人要求）。
     //
     // 我上一轮给纵轴设了 1.0 hPa 的最小量程，理由是"防止微小起伏被画成大山"——
@@ -509,10 +513,13 @@ private fun PressureCheckInChart(
     // 什么也读不出来。宁可让分辨率最大化、由数字说明量级。
     //
     // 仍然保留一个极小的下限，只为了避免"数据完全平坦时除零"这种退化情形。
-    val span = (dataMax - dataMin).coerceAtLeast(DEGENERATE_SPAN_HPA)
-    val pad = span * 0.05f
+    val dataSpan = (dataMax - dataMin).coerceAtLeast(DEGENERATE_SPAN_HPA)
+    val pad = dataSpan * 0.05f
     val low = dataMin - pad
     val high = dataMax + pad
+    // 映射用它自己的量程：上面加了 padding，就不能再拿 dataSpan 当分母，
+    // 否则曲线会超出上下边界 5%（这类"两个量混用"的错在这个文件里犯过两次了）。
+    val axisSpan = high - low
 
     Column(modifier = modifier) {
         Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
@@ -521,7 +528,7 @@ private fun PressureCheckInChart(
                     ((timestampMs - fromMs).toFloat() / (nowMs - fromMs)) * size.width
 
                 fun yOf(pressure: Float): Float =
-                    size.height - ((pressure - low) / span) * size.height
+                    size.height - ((pressure - low) / axisSpan) * size.height
 
                 // 暗色底 + 淡网格：有参照才看得出量级
                 drawRoundRect(
