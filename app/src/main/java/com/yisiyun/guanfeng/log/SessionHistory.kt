@@ -78,6 +78,21 @@ object SessionHistory {
         return collected.toList()
     }
 
+    /** 删除超过保留期的会话文件。长期连续记录必须有这条，否则 ROM 会被慢慢撑满。 */
+    fun pruneOldSessions(context: Context, keepDays: Int): Int {
+        if (keepDays <= 0) return 0
+        val directory = context.getExternalFilesDir(null) ?: context.filesDir
+        val cutoffMs = System.currentTimeMillis() - keepDays.toLong() * 24 * 60 * 60 * 1000
+        var removed = 0
+        directory.listFiles { file ->
+            file.isFile && file.name.startsWith(FILE_PREFIX) && file.name.endsWith(FILE_SUFFIX) &&
+                file.lastModified() < cutoffMs
+        }?.forEach { file ->
+            if (runCatching { file.delete() }.getOrDefault(false)) removed++
+        }
+        return removed
+    }
+
     /** 从磁盘恢复：按修改时间从新到旧读会话文件，凑满窗口即停。 */
     fun loadRecent(
         context: Context,

@@ -68,8 +68,18 @@ object PressureRecorder {
     /** 界面实时读数刷新节奏。 */
     private const val LIVE_TICK_MS = 2_000L
 
-    /** 样本聚合与落盘节奏：15 秒一个样本，3 小时 = 720 个。 */
-    private const val SAMPLE_INTERVAL_MS = 15_000L
+    /**
+     * 样本聚合与落盘节奏：5 秒一个样本。
+     *
+     * 这个值是在两个方向上折中出来的：
+     *   · 太密（原为 2 秒）：3 小时窗口下一天 4 万多行，且相邻差异几乎全是噪声；
+     *   · 太疏（曾试 15 秒）：一趟 45 秒的电梯只剩 3 个样本，轨迹分辨率掉一个量级——
+     *     而真机验证过的电梯/楼梯行为（−70.5 米、往返闭合 0.4 米）是在 2 秒采样下测的，
+     *     不该在没重新验证的情况下把分辨率砍到 1/7。
+     * 5 秒下：3 小时 = 2160 个样本、一天约 1.7 万行（~2 MB），电梯约 9 个样本。
+     * 每个样本内部聚合约 40 个原始读数，噪声仍被中位数完全压掉。
+     */
+    private const val SAMPLE_INTERVAL_MS = 5_000L
 
     /** 正式趋势窗口。噪声在 3 小时内只折算约 0.013 hPa/h，远低于 0.5 hPa/h 的判定边界。 */
     private const val WINDOW_MS = 3L * 60L * 60L * 1000L
@@ -78,6 +88,9 @@ object PressureRecorder {
 
     /** 恢复历史时：超过这个间隔视为断档，断档之前的数据一律不接（跨空洞拟合会造出假趋势）。 */
     private const val MAX_GAP_MS = 5L * 60L * 1000L
+
+    /** 会话文件保留天数。5 秒采样约 2 MB/天，留 30 天即可覆盖绝大多数回看需求。 */
+    private const val KEEP_DAYS = 30
 
     /** 内存里保留的样本上限（4 小时容量，比窗口多留一档余量）。 */
     private val MAX_SAMPLES = (4 * 60 * 60 * 1000L / SAMPLE_INTERVAL_MS).toInt()
@@ -147,6 +160,8 @@ object PressureRecorder {
         scope = newScope
         newScope.launch {
             val restored = runCatching {
+                // 先按保留策略清掉过期会话文件，避免 32GB ROM 被日积月累撑满
+                SessionHistory.pruneOldSessions(applicationContext, KEEP_DAYS)
                 SessionHistory.loadRecent(applicationContext, startedAtMs, WINDOW_MS, MAX_GAP_MS)
             }.getOrElse { error ->
                 Log.w(TAG, "读取历史样本失败: $error")

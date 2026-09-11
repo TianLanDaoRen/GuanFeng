@@ -37,6 +37,16 @@ fun BodyPage(state: RecorderState) {
             .padding(horizontal = 14.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        // 与打卡页（橙）、记录页（绿）一致：每页给一个可识别的标题，体感用蓝
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("体感", color = Color(0xFF6FB4E8), fontSize = 11.sp)
+            Spacer(Modifier.fillMaxWidth(0.12f))
+            Text("环境 × 身体", color = Color(0xFF6E6E6E), fontSize = 8.sp)
+        }
+
         ReadingRow(
             label = "实时心率",
             value = state.heartRateBpm?.let { "%.0f".format(it) } ?: "—",

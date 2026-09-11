@@ -88,7 +88,7 @@ fun RecordPage(state: RecorderState) {
 
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "每 15 秒一个样本 · 正式窗口 3 小时 · 风雨倾向为启发式规则、未用真实降水校准",
+            text = "每 5 秒一个样本 · 正式窗口 3 小时 · 风雨倾向为启发式规则、未用真实降水校准",
             color = Color(0xFF4E4E4E),
             fontSize = 7.sp,
             lineHeight = 10.sp,
