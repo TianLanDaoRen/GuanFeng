@@ -265,10 +265,27 @@ fun AssociationPage(state: RecorderState) {
                         nowMs = System.currentTimeMillis(),
                         modifier = Modifier.fillMaxWidth().height(88.dp),
                     )
+                    // 一行一件事。原先三件事挤在一行里（打卡数 · 大变化日 · 落在其上的打卡），
+                    // 既读不清哪个数字对应什么，也容易被当成一个整体去理解——主人提得对。
                     Text(
-                        text = "打卡 ${current.checkInCount} 次 · 大变化日 ${current.bigSwingDays} 天" +
-                            " · 落在其上的打卡 ${current.checkInsOnBigSwingDays} 次",
+                        text = "不适打卡 ${current.checkInCount} 次",
                         color = Color(0xFFD0D0D0),
+                        fontSize = 9.sp,
+                    )
+                    Text(
+                        text = "气压大变化日 ${current.bigSwingDays} 天",
+                        color = Color(0xFFD0D0D0),
+                        fontSize = 9.sp,
+                    )
+                    val overlap = current.overlapRatio
+                    Text(
+                        text = if (overlap == null) {
+                            "还没有打卡记录"
+                        } else {
+                            "其中落在变化日 ${current.checkInsOnBigSwingDays} 次（%.0f%%）"
+                                .format(overlap * 100)
+                        },
+                        color = Color(0xFFE8C36A),
                         fontSize = 9.sp,
                     )
                     Text(
