@@ -45,6 +45,8 @@ data class RecorderState(
     val trend: TrendResult? = null,
     /** 速评趋势（5 分钟窗口）：3 小时窗口还没铺满时先给一个结论。 */
     val trendFast: TrendResult? = null,
+    /** 是否处于静止（无步数且加速度低）。健身中不做体感提示，见 CorroborationEngine。 */
+    val isResting: Boolean = true,
     /** 传感器此刻的瞬时心率（`TYPE_HEART_RATE` 直接给的值，不是静息心率）。 */
     val heartRateBpm: Float? = null,
     /**
@@ -378,7 +380,10 @@ object PressureRecorder {
             // 取低分位数。瞬时值直接当静息心率是错的（爬楼时也会读到 120）。
             val currentHeartRate = heartRate
             if (currentHeartRate != null && currentHeartRate > 20f &&
-                aggregator.currentSteps == 0 && aggregator.currentAccelPeak < 0.35f
+                aggregator.currentSteps == 0 && aggregator.currentAccelPeak < 0.35f &&
+                // 硬上限：静止但心率 >100 的多半是组间休息/刚运动完，
+                // 不能算静息样本。取 10 百分位已经能挡住大部分，这条是第二道闸。
+                currentHeartRate < 100f
             ) {
                 restingCandidates += currentHeartRate
                 if (restingCandidates.size > 900) {
@@ -467,6 +472,7 @@ object PressureRecorder {
                 appContext?.let { HourlyArchive.append(it, completed) }
             }
 
+            val restingNow = aggregator.currentSteps == 0 && aggregator.currentAccelPeak < 0.35f
             val written = logger?.append(
                 timestampMs = sample.timestampMs,
                 pressureHpa = sample.pressureHpa,
@@ -520,6 +526,7 @@ object PressureRecorder {
                 recording = true,
                 trend = formal,
                 trendFast = fast,
+                isResting = restingNow,
                 weatherPressureHpa = weatherPressure,
                 loggedRows = logger?.rowCount ?: 0,
                 logFileName = logger?.displayName ?: "",

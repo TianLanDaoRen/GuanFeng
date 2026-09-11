@@ -109,6 +109,21 @@ object TrendNotifier {
         true
     }.getOrDefault(false)
 
+    /**
+     * 手动发一条测试通知。
+     *
+     * 存在的理由：真实触发条件（倾向升到「高」）可能要等好几天才遇到一次，
+     * 而"通知在 ColorOS Watch 上到底会不会响/弹"必须尽早验证。
+     * 这条走同一条渠道、同一套构建逻辑，只是内容标明是测试。
+     */
+    fun sendTestNotification(context: Context) {
+        post(
+            context = context,
+            title = "测试提醒（手动触发）",
+            text = "若你能看到这条通知，说明渠道与权限都正常",
+        )
+    }
+
     /** 供测试或状态重置使用。 */
     fun resetForTest() {
         armed = true

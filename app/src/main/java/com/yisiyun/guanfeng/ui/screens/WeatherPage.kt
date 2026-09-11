@@ -54,9 +54,17 @@ fun WeatherPage(state: RecorderState) {
         restingHeartRateBpm = state.restingHeartRateBpm,
         wristTemperatureC = state.wristTemperatureC,
         wristTempBaselineC = state.wristTemperatureBaselineC,
+        isResting = state.isResting,
     )
     val likelihood = if (rawHasConclusion) {
-        CorroborationEngine.apply(assessment!!.likelihood, corroborations)
+        CorroborationEngine.apply(
+            likelihood = assessment!!.likelihood,
+            items = corroborations,
+            // 只在气压本身正在下降时才允许佐证升档：
+            // 否则"气压平稳 + 走进楼道"就能报出一次无中生有的降雨
+            pressureFalling = trend?.grade == TrendGrade.FALLING ||
+                trend?.grade == TrendGrade.FALLING_FAST,
+        )
     } else {
         RainLikelihood.UNKNOWN
     }

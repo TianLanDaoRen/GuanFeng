@@ -12,12 +12,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -308,30 +307,61 @@ fun AssociationPage(state: RecorderState) {
     }
 
     if (showConsent) {
-        AlertDialog(
-            onDismissRequest = { showConsent = false },
-            title = { Text("需要联网", fontSize = 13.sp, color = Color.White) },
-            text = {
+        // 自定义弹层而不是 Material AlertDialog：后者在 189dp 宽的表盘上
+        // 会把长文案直接裁掉（实测最后一行被切），而且不吃 Markdown——
+        // 我在文案里写的 **小时级** 于是原样露出了星号。
+        // 自己的弹层可以做到：可滚动、尺寸受控、样式与其余界面一致、文案里不放任何标记。
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF0A0A0A))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+            Text("需要联网", color = Color.White, fontSize = 13.sp)
+            Spacer(Modifier.height(6.dp))
+            Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                 Text(
-                    text = "将把这些聚合统计发到 yunsisanren.top 做一次分析：\n" +
-                        "· 气压与打卡的天数、极值、次数、标签分布\n" +
-                        "· 心率 / 腕温 / 光照的**小时级**统计（不是逐点读数）\n" +
-                        "不含逐条打卡记录、备注原文、体征逐点数据与任何身份标识。",
-                    fontSize = 9.sp,
+                    text = "将上传：\n" +
+                        "· 气压与打卡的统计（天数、极值、次数、标签分布）\n" +
+                        "· 心率 / 腕温 / 光照的小时级统计\n\n" +
+                        "不会上传：\n" +
+                        "逐条打卡记录、备注原文、体征逐点读数、任何身份标识。",
                     color = Color(0xFFC8C8C8),
-                    lineHeight = 12.sp,
+                    fontSize = 9.sp,
+                    lineHeight = 13.sp,
                 )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showConsent = false
-                    startReport()
-                }) { Text("继续", fontSize = 11.sp) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showConsent = false }) { Text("取消", fontSize = 11.sp) }
-            },
-        )
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(64.dp)
+                        .height(30.dp)
+                        .background(Color(0xFF1E1E1E), RoundedCornerShape(15.dp))
+                        .clickable { showConsent = false },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("取消", color = Color(0xFFB0B0B0), fontSize = 11.sp)
+                }
+                Box(
+                    modifier = Modifier
+                        .width(64.dp)
+                        .height(30.dp)
+                        .background(Color(0xFF2A4A6F), RoundedCornerShape(15.dp))
+                        .clickable {
+                            showConsent = false
+                            startReport()
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("继续", color = Color(0xFFD8E8FA), fontSize = 11.sp)
+                }
+            }
+        }
     }
 }
 

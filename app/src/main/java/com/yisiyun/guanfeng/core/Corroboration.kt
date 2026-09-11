@@ -64,6 +64,13 @@ object CorroborationEngine {
         restingHeartRateBpm: Float?,
         wristTemperatureC: Float?,
         wristTempBaselineC: Float?,
+        /**
+         * 用户是否处于静止。健身/运动后心率与腕温必然偏离基线，
+         * 那不是天气信号——所以运动中的体感提示一律不给，
+         * 否则每次跑完步都会看到一行「体感：心率偏高 16 bpm」，
+         * 看起来像是天气造成的，纯属误导。
+         */
+        isResting: Boolean = true,
     ): List<Corroboration> {
         val result = mutableListOf<Corroboration>()
 
@@ -83,6 +90,9 @@ object CorroborationEngine {
                 }
             }
         }
+
+        // 健身与运动一律不参与体感提示
+        if (!isResting) return result
 
         if (heartRateBpm != null && restingHeartRateBpm != null &&
             heartRateBpm - restingHeartRateBpm >= HEART_RATE_DELTA_BPM
@@ -116,15 +126,25 @@ object CorroborationEngine {
     }
 
     /**
-     * 用佐证微调风雨倾向：**只在气压本身已在下降倾向时，最多升一档**。
+     * 用佐证微调风雨倾向：**只在气压本身正在下降时，最多升一档**。
      *
-     * 这样设计的原因：佐证不能凭空造出结论（否则一次开灯关灯的误判就能报出降雨），
-     * 只能加强一个已经存在的下降判断。
+     * ## 为什么必须限定"正在下降"而不是"已有结论"
+     *
+     * 光照是本应用中唯一能改判定的佐证，而它也是最容易被误触发的：
+     * 走进楼道、进健身房、拉上窗帘、戴回袖子——都会造成剧烈的相对跌幅。
+     * 如果只要求"气压已有结论"，那么**气压平稳 + 走进室内**就能把「低」升成「中」，
+     * 报出一次无中生有的降雨。而真正要下雨时（阴云压城）气压本就在降，
+     * 这条限定不会拦掉任何真实信号。
+     *
+     * 另外：佐证不能凭空造出结论（未知不可被升成已知），
+     * 所以一次关灯或进屋都不可能触发提醒。
      */
     fun apply(
         likelihood: RainLikelihood,
         items: List<Corroboration>,
+        pressureFalling: Boolean,
     ): RainLikelihood {
+        if (!pressureFalling) return likelihood
         if (items.none { it.canUpgradeLikelihood }) return likelihood
         return when (likelihood) {
             RainLikelihood.LOW -> RainLikelihood.MEDIUM

@@ -21,8 +21,8 @@ import androidx.compose.ui.unit.sp
 import com.yisiyun.guanfeng.core.TrendConfidence
 import com.yisiyun.guanfeng.core.WeatherRule
 import com.yisiyun.guanfeng.data.RecorderState
-import com.yisiyun.guanfeng.log.WeatherObservationLogger
 import com.yisiyun.guanfeng.log.WeatherObservation
+import com.yisiyun.guanfeng.service.TrendNotifier
 import com.yisiyun.guanfeng.core.RainLikelihood
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.setValue
@@ -35,6 +35,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import com.yisiyun.guanfeng.log.WeatherObservationLogger
 
 /**
  * 第四屏 · 记录：这一屏存在的意义是让「它到底有没有在记」一眼可见、可以自己验证。
@@ -50,6 +51,7 @@ fun RecordPage(state: RecorderState) {
     val rationale = trend?.let { WeatherRule.assess(it).rationale }
     var observedToday by remember { mutableStateOf(WeatherObservationLogger.countToday(context)) }
     var observeFeedback by remember { mutableStateOf("") }
+    var noticeFeedback by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
@@ -103,6 +105,33 @@ fun RecordPage(state: RecorderState) {
                 lineHeight = 11.sp,
             )
         }
+
+        Spacer(Modifier.height(8.dp))
+        // 诊断工具：手动触发一次转坏提醒，用于验证通知在 ColorOS Watch 上的呈现
+        // （真的等一场气压急降可能要几天）。放在记录页——这页本来就是诊断用途。
+        Text("诊断", color = Color(0xFFF2C14E), fontSize = 9.sp)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(30.dp)
+                .background(Color(0xFF2A2A1E), RoundedCornerShape(15.dp))
+                .clickable {
+                    TrendNotifier.sendTestNotification(context)
+                    noticeFeedback = "已发测试通知"
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("测试提醒", color = Color(0xFFE8DFB8), fontSize = 10.sp)
+        }
+        Text(
+            text = if (noticeFeedback.isNotEmpty()) {
+                noticeFeedback
+            } else {
+                "验证通知能否弹出、是否按系统设置响铃震动"
+            },
+            color = Color(0xFF6E6E6E),
+            fontSize = 7.sp,
+        )
 
         Spacer(Modifier.height(6.dp))
         // 天气实况：校准唯一的数据来源。

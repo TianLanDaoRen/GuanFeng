@@ -104,26 +104,89 @@ class CorroborationTest {
 
         assertEquals(
             RainLikelihood.MEDIUM,
-            CorroborationEngine.apply(RainLikelihood.LOW, upgradable),
+            CorroborationEngine.apply(RainLikelihood.LOW, upgradable, pressureFalling = true),
         )
         assertEquals(
             RainLikelihood.HIGH,
-            CorroborationEngine.apply(RainLikelihood.MEDIUM, upgradable),
+            CorroborationEngine.apply(RainLikelihood.MEDIUM, upgradable, pressureFalling = true),
         )
         assertEquals(
             "已经是最高的就不再叠加",
             RainLikelihood.HIGH,
-            CorroborationEngine.apply(RainLikelihood.HIGH, upgradable),
+            CorroborationEngine.apply(RainLikelihood.HIGH, upgradable, pressureFalling = true),
         )
         assertEquals(
             "未知不能被佐证升成已知——那样一次关灯就能报出降雨",
             RainLikelihood.UNKNOWN,
-            CorroborationEngine.apply(RainLikelihood.UNKNOWN, upgradable),
+            CorroborationEngine.apply(RainLikelihood.UNKNOWN, upgradable, pressureFalling = true),
         )
         assertEquals(
             "只有提示类佐证时不改判定",
             RainLikelihood.LOW,
-            CorroborationEngine.apply(RainLikelihood.LOW, onlyHint),
+            CorroborationEngine.apply(RainLikelihood.LOW, onlyHint, pressureFalling = true),
         )
+    }
+
+    @Test
+    fun `气压没有在下降时_光照骤降也不许升档`() {
+        // 真实场景：气压平稳，人走进楼道 → 光照骤降。
+        // 若允许升档，就会报出一次无中生有的降雨。
+        val upgradable = listOf(
+            Corroboration(CorroborationKind.LIGHT_DROP, "光照骤降 60%", true, "")
+        )
+
+        assertEquals(
+            "气压平稳时走进室内不该改变判定",
+            RainLikelihood.LOW,
+            CorroborationEngine.apply(RainLikelihood.LOW, upgradable, pressureFalling = false),
+        )
+        assertEquals(
+            "气压正在下降时才允许佐证加强",
+            RainLikelihood.MEDIUM,
+            CorroborationEngine.apply(RainLikelihood.LOW, upgradable, pressureFalling = true),
+        )
+    }
+
+    @Test
+    fun `运动中的心率与腕温偏离不给体感提示`() {
+        // 健身爱好者跑完步：心率 150（基线 62）、腕温 36.5（基线 33）。
+        // 这些不是天气信号，不该上屏暗示"身体在响应天气"。
+        val moving = CorroborationEngine.evaluate(
+            lightLux = null,
+            lightDelta10Min = null,
+            heartRateBpm = 150f,
+            restingHeartRateBpm = 62f,
+            wristTemperatureC = 36.5f,
+            wristTempBaselineC = 33.0f,
+            isResting = false,
+        )
+        val resting = CorroborationEngine.evaluate(
+            lightLux = null,
+            lightDelta10Min = null,
+            heartRateBpm = 150f,
+            restingHeartRateBpm = 62f,
+            wristTemperatureC = 36.5f,
+            wristTempBaselineC = 33.0f,
+            isResting = true,
+        )
+
+        assertTrue("运动中一条都不该给", moving.isEmpty())
+        assertEquals("静止时才是体感信号", 2, resting.size)
+    }
+
+    @Test
+    fun `运动中仍然保留光照佐证_云不会因为你在跑步就不来`() {
+        val items = CorroborationEngine.evaluate(
+            lightLux = 240f,
+            lightDelta10Min = -260f,
+            heartRateBpm = 150f,
+            restingHeartRateBpm = 62f,
+            wristTemperatureC = null,
+            wristTempBaselineC = null,
+            isResting = false,
+        )
+
+        assertEquals("光照保留", 1, items.size)
+        assertEquals(CorroborationKind.LIGHT_DROP, items[0].kind)
     }
 }
