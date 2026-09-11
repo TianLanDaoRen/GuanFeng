@@ -46,6 +46,7 @@ object SessionHistory {
         val indexOfPressure = header.indexOf("pressure_hpa")
         val indexOfAccel = header.indexOf("vertical_accel")
         val indexOfSteps = header.indexOf("steps")
+        val indexOfDisplacement = header.indexOf("vertical_displacement_m")
         if (indexOfTimestamp < 0 || indexOfPressure < 0) return emptyList()
 
         val required = maxOf(indexOfTimestamp, indexOfPressure, indexOfAccel, indexOfSteps)
@@ -58,7 +59,19 @@ object SessionHistory {
             val pressure = cells[indexOfPressure].toFloatOrNull() ?: continue
             val accel = if (indexOfAccel >= 0) cells[indexOfAccel].toFloatOrNull() ?: 0f else 0f
             val steps = if (indexOfSteps >= 0) cells[indexOfSteps].toIntOrNull() ?: 0 else 0
-            result += PressureSample(timestamp, pressure, accel, steps)
+            // 净位移列是后加的：老文件没有该列时留 null，分类器会自动退回旧判据
+            val displacement = indexOfDisplacement
+                .takeIf { it >= 0 }
+                ?.let { cells.getOrNull(it)?.toFloatOrNull() }
+            // 用具名参数：样本字段会增加（净位移就是这样加进来的），
+            // 位置参数在字段插入顺序变化时会静默错位。
+            result += PressureSample(
+                timestampMs = timestamp,
+                pressureHpa = pressure,
+                verticalAccel = accel,
+                stepsInWindow = steps,
+                verticalDisplacementM = displacement,
+            )
         }
         return result
     }

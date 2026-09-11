@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yisiyun.guanfeng.core.TrendConfidence
 import com.yisiyun.guanfeng.core.WeatherRule
+import com.yisiyun.guanfeng.data.PressureRecorder
 import com.yisiyun.guanfeng.data.RecorderState
 import com.yisiyun.guanfeng.log.WeatherObservation
 import com.yisiyun.guanfeng.service.TrendNotifier
@@ -135,8 +136,29 @@ fun RecordPage(state: RecorderState) {
             text = if (noticeFeedback.isNotEmpty()) {
                 noticeFeedback
             } else {
-                "震动 + indicator 文案（通知已被系统白名单拦掉，不再依赖它）"
+                "震动 + 应用内待确认卡片（通知已被系统白名单拦掉，不再依赖它）"
             },
+            color = Color(0xFF6E6E6E),
+            fontSize = 7.sp,
+        )
+
+        Spacer(Modifier.height(4.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(30.dp)
+                .background(Color(0xFF2A2A1E), RoundedCornerShape(15.dp))
+                .clickable {
+                    PressureRecorder.resetElevationBaseline()
+                    noticeFeedback = "高度基准已重置为 0"
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("重置高度基准", color = Color(0xFFE8DFB8), fontSize = 10.sp)
+        }
+        Text(
+            text = "累计垂直位移当前 %+.1f 米；被误判污染后点这里归零"
+                .format(trend?.elevationMeters ?: 0f),
             color = Color(0xFF6E6E6E),
             fontSize = 7.sp,
         )

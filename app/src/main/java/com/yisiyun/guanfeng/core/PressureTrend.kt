@@ -27,6 +27,14 @@ data class PressureSample(
     val pressureHpa: Float,
     /** 去重力后的垂直加速度（m/s²），静止时接近 0。 */
     val verticalAccel: Float = 0f,
+    /**
+     * 带泄漏二次积分得到的**竖直净位移**（米）。
+     *
+     * 这是判断"人是否真的在垂直运动"的正确量：挥手的往复运动净位移≈0，
+     * 而爬楼/坐电梯是持续位移、会稳定累积。用加速度峰值判断则两者无法区分
+     * （真机上挥手很容易到 10 m/s² 以上，比爬楼还大）。
+     */
+    val verticalDisplacementM: Float? = null,
     /** 该采样窗口内累计步数（step_detector 差值），0 表示没在走。 */
     val stepsInWindow: Int = 0
 )
@@ -159,8 +167,39 @@ object ElevationClassifier {
      * 也没有步数，但气压仍在持续变化；只认瞬时证据会把匀速段误判成天气剧变。
      * 判决由引擎里的「垂直位移状态机」完成：瞬时证据点火，之后靠持续的变化率维持。
      */
-    fun hasInstantEvidence(sample: PressureSample): Boolean =
-        abs(sample.verticalAccel) > VERTICAL_ACCEL_EPSILON || sample.stepsInWindow > 0
+    /**
+     * 净位移达到此值即认为"人真的在垂直移动"（米）。
+     *
+     * 取值依据：
+     *   · 挥手/走路：带泄漏二次积分后净位移约 0.1~0.5 米；
+     *   · 爬一层楼：约 3 米；坐电梯：几十米。
+     * 1.5 米落在两个量级之间，且高于积分漂移（偏差 0.03 m/s² 时约 0.14 米）。
+     */
+    const val DISPLACEMENT_EVIDENCE_M = 1.5f
+
+    /**
+     * 瞬时证据：这一采样点上是否看得出**真正的垂直位移**。
+     *
+     * 曾经这里用的是竖直加速度峰值，那是错的：真机上挥一下手就能到 10 m/s² 以上，
+     * 比爬楼时的加速度还大，于是"有垂直运动"几乎恒为真——手一动就把气压变化
+     * 记成高度变化。2026-09-11 主人在屋里活动一下午被攒出 +10 米假位移，
+     * 根因就在这里。
+     *
+     * 换成净位移之后：往复运动互相抵消，只有持续的单向位移才会积累。
+     */
+    fun hasInstantEvidence(sample: PressureSample): Boolean {
+        val displacement = sample.verticalDisplacementM
+        if (displacement != null) {
+            // 新路径：净位移。挥手的往复运动互相抵消，只有持续单向位移才会积累。
+            return kotlin.math.abs(displacement) >= DISPLACEMENT_EVIDENCE_M
+        }
+        // 旧路径（仅在读历史数据时走到）：早期落盘的 CSV 没有净位移列，
+        // 只能退回"加速度峰值或步数"这条旧判据。它对静止场景够用，
+        // 但会在手腕活动时几乎恒为真——这正是 2026-09-11 那次事故的根源，
+        // 所以**新写入的数据一律走净位移**，旧路径只服务回放与单测夹具。
+        return abs(sample.verticalAccel) > VERTICAL_ACCEL_EPSILON ||
+            sample.stepsInWindow > 0
+    }
 }
 
 /**

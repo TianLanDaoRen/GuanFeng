@@ -19,6 +19,7 @@ class SampleAggregator {
 
     private val pressures = ArrayList<Float>(256)
     private var accelPeak = 0f
+    private var verticalDisplacement = 0f
     private var steps = 0
 
     /** 当前聚合区间内的垂直加速度峰值（供实时判定「是否静止」用）。 */
@@ -29,6 +30,11 @@ class SampleAggregator {
 
     fun addPressure(value: Float) {
         pressures += value
+    }
+
+    /** 采集器算出的竖直净位移（米），原样带进样本供高度分类器判断。 */
+    fun setVerticalDisplacement(meters: Float) {
+        verticalDisplacement = meters
     }
 
     fun addVerticalAccel(value: Float) {
@@ -46,6 +52,7 @@ class SampleAggregator {
             timestampMs = timestampMs,
             pressureHpa = median(pressures),
             verticalAccel = accelPeak,
+            verticalDisplacementM = verticalDisplacement,
             stepsInWindow = steps,
         )
         pressures.clear()

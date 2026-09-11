@@ -123,6 +123,9 @@ object PressureRecorder {
     /** 速评窗口短，绝对量门限必须按比例缩小，否则 5 分钟内永远达不到 0.5 hPa 而恒判「平稳」。 */
     private const val FAST_MIN_ABSOLUTE_DELTA_HPA = 0.15f
 
+    /** 竖直积分的时间常数（秒）：足够长到能积累一次爬楼，又短到能抑制漂移。 */
+    private const val VERTICAL_TAU_S = 3f
+
     /** 累计降幅的观察窗：足够长到能记住一场天气过程，又不至于记住上一天的旧账。 */
     private const val RECENT_FALL_WINDOW_MS = 6L * 60L * 60L * 1000L
 
@@ -169,10 +172,13 @@ object PressureRecorder {
     private val samples = ArrayList<PressureSample>(MAX_SAMPLES + 1)
 
     /** 累计的高度偏移（hPa）：所有被引擎判为高度事件的步进之和，跨会话持久化。 */
-    /** 腕温的慢速滑动均值：腕温绝对值没有天气含义，只能与自身基线比较。 */
-    /** 累计的高度偏移（hPa）：所有被引擎判为高度事件的步进之和，跨会话持久化。 */
     private var elevationOffsetHpa = 0f
     private var lastPersistMs = 0L
+
+    /** 竖直积分的中间量（只在传感器回调里更新）。 */
+    private var verticalVelocity = 0f
+    private var verticalDisplacement = 0f
+    private var lastAccelNs = 0L
 
     /** 腕温的慢速滑动均值：腕温绝对值没有天气含义（环境与衣袖混淆最大），只能与自身基线比较。 */
     private var wristTempBaseline: Float? = null
@@ -312,7 +318,56 @@ object PressureRecorder {
      */
     fun currentHourRow(): HourlyRow? = hourAccumulator.snapshot()
 
+    /**
+     * 重置累计高度基准（一键）。
+     *
+     * 为什么需要它：累计偏移是持久化的，一旦被误判污染（例如 2026-09-11
+     * 那次屋里活动被攒出 +10 米假位移），它会**一直留在磁盘上**。
+     * 恒定偏移不影响"变化量"，所以对齐度没有危害；但绝对值显示会一直偏，
+     * 而且下一次真实爬楼会从这个错误基准继续累加。给一个显式复位入口，
+     * 比让它默默烂在那里好。
+     */
+    @Synchronized
+    fun resetElevationBaseline() {
+        elevationOffsetHpa = 0f
+        verticalVelocity = 0f
+        verticalDisplacement = 0f
+        appContext?.let { context ->
+            SessionHistory.saveRecorderState(
+                context = context,
+                restingHeartRateBpm = restingBaseline,
+                elevationOffsetHpa = 0f,
+            )
+        }
+        _state.value = _state.value.copy(weatherPressureHpa = _state.value.pressureHpa)
+        Log.i(TAG, "高度基准已重置")
+    }
+
     fun isRunning(): Boolean = started
+
+    /**
+     * 竖直方向的带泄漏二次积分，用来估**净位移**。
+     *
+     * 为什么要它：判断"人是否真的在垂直运动"不能看加速度峰值——
+     * 挥一下手就能到 10 m/s² 以上，比爬楼还大；而位移是持续与否的差别：
+     * 往复运动互相抵消、净位移趋近 0，爬楼/电梯则稳定累积。
+     *
+     * 带泄漏（时间常数 [VERTICAL_TAU_S] 秒）是为了抑制积分漂移：
+     * 目的是"有没有持续位移"，不是精确轨迹，所以宁可让久远的历史衰减掉。
+     */
+    private fun integrateVertical(eventTimestampNs: Long, verticalAccel: Float) {
+        val dt = if (lastAccelNs == 0L) {
+            0f
+        } else {
+            ((eventTimestampNs - lastAccelNs) / 1_000_000_000.0).toFloat().coerceIn(0f, 0.2f)
+        }
+        lastAccelNs = eventTimestampNs
+        if (dt <= 0f) return
+        val leak = kotlin.math.exp(-dt / VERTICAL_TAU_S)
+        verticalVelocity = (verticalVelocity + verticalAccel * dt) * leak
+        verticalDisplacement = (verticalDisplacement + verticalVelocity * dt) * leak
+        aggregator.setVerticalDisplacement(verticalDisplacement)
+    }
 
     private fun registerSensors(manager: SensorManager) {
         val listener = object : SensorEventListener {
@@ -346,6 +401,7 @@ object PressureRecorder {
                                     event.values[2] * gravity[2]
                                 ) / gMagnitude
                             aggregator.addVerticalAccel(abs(vertical))
+                            integrateVertical(event.timestamp, vertical)
                         }
                     }
 
@@ -514,6 +570,7 @@ object PressureRecorder {
                 lightDelta10Min = lightDelta10Min,
                 weatherPressureHpa = weatherPressure,
                 lightLux = lightLux,
+                verticalDisplacementM = sample.verticalDisplacementM,
             ) ?: false
 
             if (now - lastPersistMs >= PERSIST_INTERVAL_MS) {
