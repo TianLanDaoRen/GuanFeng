@@ -34,8 +34,8 @@ fun BodyPage(state: RecorderState) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         ReadingRow(
             label = "实时心率",
@@ -52,8 +52,6 @@ fun BodyPage(state: RecorderState) {
             hint = if (state.restingHeartRateBpm == null) "静止样本攒集中" else null,
         )
 
-        Spacer(Modifier.height(2.dp))
-
         ReadingRow(
             label = "腕温",
             value = state.wristTemperatureC?.let { "%.1f".format(it) } ?: "—",
@@ -61,8 +59,6 @@ fun BodyPage(state: RecorderState) {
             color = Color(0xFFF2C14E),
             hint = "首通道，未标定",
         )
-
-        Spacer(Modifier.height(2.dp))
 
         ReadingRow(
             label = "环境光",
@@ -97,7 +93,7 @@ private fun ReadingRow(
         ) {
             Text(text = label, color = Color(0xFF8A8A8A), fontSize = 9.sp)
             Row(verticalAlignment = Alignment.Bottom) {
-                Text(text = value, color = color, fontSize = if (small) 17.sp else 24.sp)
+                Text(text = value, color = color, fontSize = if (small) 15.sp else 20.sp)
                 Spacer(Modifier.fillMaxWidth(0.04f))
                 Text(text = unit, color = Color(0xFF7A7A7A), fontSize = 8.sp)
             }

@@ -1,17 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- indicator / 通知栏小图标：纯白线条，避免深色底看不清 -->
+<!--
+  观风 · indicator / 通知栏小图标。
+
+  这个图标只出现在表盘顶部的 indicator 里，实际渲染高度约 14–16px，
+  所以只画最必要的三笔风纹：太复杂在这个尺寸下会糊成一团。
+  上一笔右端上卷，是"风"最通用的字形暗示。
+  颜色必须纯白——indicator 底色不可控，深色会看不清。
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
+    <!-- 上：长笔，右端上卷 -->
     <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M3,6h14v2H3z" />
+        android:pathData="M2.5,7.5 H13 C15.5,7.5 16.6,6 16.6,4.4"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round" />
+    <!-- 中：最长一笔 -->
     <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M3,11h9v2H3z" />
+        android:pathData="M2.5,12 H16.4 C18.5,12 19.5,10.8 19.5,9.4"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round" />
+    <!-- 下：短笔 -->
     <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M3,16h12v2H3z" />
+        android:pathData="M2.5,16.5 H13.5"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round" />
 </vector>

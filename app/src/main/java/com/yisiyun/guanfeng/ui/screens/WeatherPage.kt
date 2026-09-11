@@ -34,7 +34,7 @@ fun WeatherPage(state: RecorderState) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
@@ -70,17 +70,18 @@ fun WeatherPage(state: RecorderState) {
             grade = trend?.grade ?: TrendGrade.INSUFFICIENT,
             likelihood = assessment?.likelihood ?: RainLikelihood.UNKNOWN,
             hasTrend = hasTrend,
-            modifier = Modifier.height(122.dp).fillMaxWidth(0.78f),
+            // 104dp：122dp 时会把底部「ΔP(3h)」挤出屏幕（实测）
+            modifier = Modifier.height(104.dp).fillMaxWidth(0.78f),
         )
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = assessment?.advice ?: "再等等",
                 color = Color.White,
-                fontSize = 15.sp,
+                fontSize = 14.sp,
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(2.dp))
             // 只放短依据：主屏 189dp 宽，长句会折行并把布局顶乱（完整依据在记录页）
             Text(
                 text = assessment?.shortReason ?: "样本不足",

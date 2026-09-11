@@ -40,8 +40,9 @@ fun GuanFengApp() {
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         HorizontalPager(
             state = pagerState,
-            // 底部留 20dp：翻页符是浮层，留不够会把各页最后一行小字遮住
-            modifier = Modifier.fillMaxSize().padding(bottom = 20.dp),
+            // 底部留 14dp：翻页符浮层只占底部 5–11dp，14dp 足够不遮挡且不浪费纵向空间
+            // （曾用 20dp，结果把观风页与体感页各挤掉一行——余量要算着给，不能图省事）
+            modifier = Modifier.fillMaxSize().padding(bottom = 14.dp),
         ) { page ->
             when (page) {
                 0 -> WeatherPage(state)

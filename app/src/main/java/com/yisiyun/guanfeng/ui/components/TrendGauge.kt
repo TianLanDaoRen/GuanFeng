@@ -104,11 +104,21 @@ fun TrendGauge(
         }
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = if (hasTrend) likelihood.label else "—",
-                color = likelihoodColor(likelihood),
-                fontSize = 40.sp,
-            )
+            // 没有趋势时不要显示一个孤零零的短横（视觉上像坏了），
+            // 而是给一个明确的状态词，字号也相应收小
+            if (hasTrend) {
+                Text(
+                    text = likelihood.label,
+                    color = likelihoodColor(likelihood),
+                    fontSize = 38.sp,
+                )
+            } else {
+                Text(
+                    text = "观察中",
+                    color = Color(0xFF9A9A9A),
+                    fontSize = 20.sp,
+                )
+            }
             Text(
                 text = "风雨倾向",
                 color = Color(0xFF8A8A8A),
