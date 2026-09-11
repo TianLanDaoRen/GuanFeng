@@ -62,6 +62,9 @@ fun RecordPage(state: RecorderState) {
         Kv("会话文件", state.logFileName.ifEmpty { "—" }
             .removePrefix("guanfeng_")
             .removeSuffix(".csv"))
+        if (state.restoredSamples > 0) {
+            Kv("续接历史", "${state.restoredSamples} 个样本")
+        }
 
         Spacer(Modifier.height(4.dp))
         Text("高度解耦", color = Color(0xFFF2C14E), fontSize = 9.sp)
@@ -85,7 +88,7 @@ fun RecordPage(state: RecorderState) {
 
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "每 2 秒采样 · 演示窗口 6 分钟 · 风雨倾向为启发式规则、未用真实降水校准",
+            text = "每 15 秒一个样本 · 正式窗口 3 小时 · 风雨倾向为启发式规则、未用真实降水校准",
             color = Color(0xFF4E4E4E),
             fontSize = 7.sp,
             lineHeight = 10.sp,
