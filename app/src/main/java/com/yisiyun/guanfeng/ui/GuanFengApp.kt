@@ -19,6 +19,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.yisiyun.guanfeng.data.PressureRecorder
+import com.yisiyun.guanfeng.ui.screens.AssociationPage
 import com.yisiyun.guanfeng.ui.screens.BodyPage
 import com.yisiyun.guanfeng.ui.screens.CheckInPage
 import com.yisiyun.guanfeng.ui.screens.RecordPage
@@ -30,7 +31,7 @@ import com.yisiyun.guanfeng.ui.screens.WeatherPage
  * 按 OPPO 交互规范：非屏幕左边缘的左右滑动用于切换应用内功能界面，
  * 多页面时应给出翻页符提示；左边缘的右滑留给系统的返回手势（windowSwipeToDismiss）。
  */
-private const val PAGE_COUNT = 4
+private const val PAGE_COUNT = 5
 
 @Composable
 fun GuanFengApp() {
@@ -48,6 +49,7 @@ fun GuanFengApp() {
                 0 -> WeatherPage(state)
                 1 -> BodyPage(state)
                 2 -> CheckInPage(state)
+                3 -> AssociationPage(state)
                 else -> RecordPage(state)
             }
         }

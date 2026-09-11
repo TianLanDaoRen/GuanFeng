@@ -125,4 +125,44 @@ object SessionHistory {
         }
         return parse(lines)
     }
+
+    /**
+     * 长视图用的小时级降采样：扫描 [days] 天内的会话文件，
+     * **边读边折叠成小时桶，不把整周样本留在内存里**
+     * （一周原始样本约 12 万行 / 15MB，直接读进来在手表上会又慢又占内存）。
+     */
+    fun loadHourlyRollup(
+        context: Context,
+        days: Int,
+        nowMs: Long,
+    ): List<com.yisiyun.guanfeng.core.HourlyBucket> {
+        val directory = context.getExternalFilesDir(null) ?: context.filesDir
+        val cutoff = nowMs - days.toLong() * 24 * 60 * 60 * 1000
+        val files = directory.listFiles { file ->
+            file.isFile && file.name.startsWith(FILE_PREFIX) && file.name.endsWith(FILE_SUFFIX) &&
+                file.lastModified() >= cutoff
+        }?.sortedBy { it.lastModified() } ?: return emptyList()
+
+        val accumulator = com.yisiyun.guanfeng.core.HourlyAccumulator()
+        for (file in files) {
+            runCatching {
+                file.bufferedReader().useLines { sequence ->
+                    val iterator = sequence.iterator()
+                    if (!iterator.hasNext()) return@useLines
+                    // 用文件真实的表头解析，而不是猜列序——将来增删列也不会读错
+                    val header = iterator.next()
+                    var scanned = 0
+                    while (iterator.hasNext()) {
+                        val line = iterator.next()
+                        scanned++
+                        if (scanned > MAX_ROWS_SCANNED) break
+                        parse(listOf(header, line)).firstOrNull()?.let { sample ->
+                            if (sample.timestampMs >= cutoff) accumulator.add(sample)
+                        }
+                    }
+                }
+            }
+        }
+        return accumulator.buckets().filter { it.hourStartMs >= cutoff }
+    }
 }
