@@ -150,6 +150,15 @@ object SessionHistory {
         context: Context,
         days: Int,
         nowMs: Long,
+        /**
+         * 只接受带天气分量列的行。
+         *
+         * 迁移历史时必须打开：老 CSV 没有 weather_pressure_hpa 列，只能拿原始气压兜底，
+         * 而原始气压里含着坐电梯/爬楼的高度变化（实测一段里有 9.5 hPa 的人为落差）。
+         * 那种数据进了归档只会污染「气压大变化日」这类统计——
+         * 宁可少一段历史，也不要一段口径不同的历史。
+         */
+        onlyDecoupled: Boolean = false,
     ): List<com.yisiyun.guanfeng.core.HourlyBucket> {
         val directory = context.getExternalFilesDir(null) ?: context.filesDir
         val cutoff = if (days >= ALL_HISTORY_DAYS) 0L
@@ -169,6 +178,8 @@ object SessionHistory {
                     val iWeather = header.indexOf("weather_pressure_hpa")
                     val iRaw = header.indexOf("pressure_hpa")
                     if (iTimestamp < 0) return@useLines
+                    // 要求已解耦时，缺天气分量列就放弃整个文件（口径不同的历史不如不要）
+                    if (onlyDecoupled && iWeather < 0) return@useLines
                     val iPressure = if (iWeather >= 0) iWeather else iRaw
                     if (iPressure < 0) return@useLines
 
