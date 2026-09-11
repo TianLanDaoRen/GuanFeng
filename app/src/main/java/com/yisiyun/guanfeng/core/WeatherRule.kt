@@ -35,6 +35,9 @@ object WeatherRule {
     /** 净降幅达到此值按中等倾向处理。 */
     private const val MODERATE_FALL_HPA = 2.0f
 
+    /** 解除所需回升幅度，与 WeatherEpisodeTracker 的默认值保持一致（迟滞门限同量级）。 */
+    private const val CLEAR_RISE_HPA = 1.5f
+
     /** 路径效率低于此值即认为"气压在来回振荡"，净变幅不代表真实趋势。 */
     private const val MIN_PATH_EFFICIENCY = 0.5f
 
@@ -58,7 +61,28 @@ object WeatherRule {
          * 于是报出「平稳 · 无需带伞」——而外面正在下雨。主人指出的正是这个边界。
          */
         recentFallHpa: Float? = null,
+        /**
+         * 天气过程状态（主人提出的模型）：一旦气压降幅越过门限就进入「可能下雨」，
+         * **一直挂着直到气压自最低点明显回升**——与过了多久无关。
+         * 这比"看最近 N 小时的降幅"更贴近事实：下雨是有始有终的过程，不是窗口统计。
+         */
+        episode: WeatherEpisode? = null,
     ): WeatherAssessment {
+        // ⓪ 过程之中：直接给结论，不被"此刻刚好平稳"带偏。
+        //    这正是主人指出的边界——降完转平很可能正在下雨，不能报「无需带伞」。
+        if (episode?.active == true) {
+            val drop = episode.dropHpa
+            val high = drop <= -BIG_FALL_HPA
+            return WeatherAssessment(
+                likelihood = if (high) RainLikelihood.HIGH else RainLikelihood.MEDIUM,
+                shortReason = if (high) "已降幅较大" else "可能下雨",
+                advice = if (high) "带伞" else "备把伞",
+                rationale = "本轮过程已累计下降 %.1f hPa，尚未出现足够回升" +
+                    "（自最低点回升 %.1f hPa 才解除）。下雨是有始有终的过程，" +
+                    "在解除之前一直维持提醒，不被此刻的瞬时平稳带偏"
+                        .format(drop, CLEAR_RISE_HPA)
+            )
+        }
         // ① 数据不够：这两条无论何时都不给结论
         if (trend.confidence == TrendConfidence.SHORT_WINDOW ||
             trend.confidence == TrendConfidence.INSUFFICIENT

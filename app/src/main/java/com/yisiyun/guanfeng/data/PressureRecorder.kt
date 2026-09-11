@@ -7,6 +7,8 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.util.Log
 import com.yisiyun.guanfeng.core.HourAccumulator
+import com.yisiyun.guanfeng.core.WeatherEpisode
+import com.yisiyun.guanfeng.core.WeatherEpisodeTracker
 import com.yisiyun.guanfeng.core.WeatherRule
 import com.yisiyun.guanfeng.core.HourlyRow
 import com.yisiyun.guanfeng.core.PressureSample
@@ -52,6 +54,8 @@ data class RecorderState(
      * 用于记住"曾经降过"，避免气压降完转平后就被判成「无需带伞」。
      */
     val recentFallHpa: Float = 0f,
+    /** 天气过程状态：进入「可能下雨」后一直挂着，直到气压自最低点明显回升。 */
+    val episode: WeatherEpisode? = null,
     /** 传感器此刻的瞬时心率（`TYPE_HEART_RATE` 直接给的值，不是静息心率）。 */
     val heartRateBpm: Float? = null,
     /**
@@ -192,6 +196,9 @@ object PressureRecorder {
 
     /** 最近 [RECENT_FALL_WINDOW_MS] 内的累计净降幅。 */
     private var recentFallHpa = 0f
+
+    /** 天气过程状态机（主人提出的模型，取代了原先的 6 小时滑动窗口）。 */
+    private val episodeTracker = WeatherEpisodeTracker()
 
     // 传感器原始读数
     private var latestPressure: Float? = null
@@ -542,6 +549,8 @@ object PressureRecorder {
             } else {
                 0f
             }
+            // 过程状态机：只看天气分量，与高度无关
+            val episode = episodeTracker.add(sample.timestampMs, weatherPressure)
 
             // 小时归档：整点切换时把上一小时落盘。
             // 体感数据也一并归档——AI 报告需要它们来判断混淆因素（例如头痛是否来自发热）。
@@ -593,8 +602,8 @@ object PressureRecorder {
             // 主动提醒：转坏到「高」时发一条通知（声音与震动交给系统）。
             // 只在升级时发一次并带冷却，避免变成噪音源——被关掉通知的提醒等于不存在。
             runCatching {
-                val formalAssessment = WeatherRule.assess(formal, recentFallHpa)
-                val fastAssessment = WeatherRule.assess(fast, recentFallHpa)
+                val formalAssessment = WeatherRule.assess(formal, recentFallHpa, episode)
+                val fastAssessment = WeatherRule.assess(fast, recentFallHpa, episode)
                 val active = if (formalAssessment.likelihood != RainLikelihood.UNKNOWN) {
                     formalAssessment to formal
                 } else {
@@ -616,6 +625,7 @@ object PressureRecorder {
                 trendFast = fast,
                 isResting = restingNow,
                 recentFallHpa = recentFallHpa,
+                episode = episode,
                 weatherPressureHpa = weatherPressure,
                 loggedRows = logger?.rowCount ?: 0,
                 logFileName = logger?.displayName ?: "",

@@ -51,7 +51,7 @@ fun RecordPage(state: RecorderState) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val trend = state.trend
-    val rationale = trend?.let { WeatherRule.assess(it, state.recentFallHpa).rationale }
+    val rationale = trend?.let { WeatherRule.assess(it, state.recentFallHpa, state.episode).rationale }
     var observedToday by remember { mutableStateOf(WeatherObservationLogger.countToday(context)) }
     var observeFeedback by remember { mutableStateOf("") }
     var noticeFeedback by remember { mutableStateOf("") }
@@ -178,7 +178,7 @@ fun RecordPage(state: RecorderState) {
                         .height(30.dp)
                         .background(Color(0xFF1E2A22), RoundedCornerShape(15.dp))
                         .clickable {
-                            val assessment = trend?.let { WeatherRule.assess(it, state.recentFallHpa) }
+                            val assessment = trend?.let { WeatherRule.assess(it, state.recentFallHpa, state.episode) }
                             val written = WeatherObservationLogger.append(
                                 context = context,
                                 observation = observation,
