@@ -142,7 +142,9 @@ class PressureTrendEngine(
     /** 计算速率所需的最小基线跨度。见 DEFAULT_MIN_BASELINE_MS 的由来。 */
     private val minBaselineMs: Long = DEFAULT_MIN_BASELINE_MS,
     /** 窗口内绝对变压的噪声门限，低于它一律按平稳处理。见 DEFAULT_MIN_ABSOLUTE_DELTA_HPA。 */
-    private val minAbsoluteDeltaHpa: Float = DEFAULT_MIN_ABSOLUTE_DELTA_HPA
+    private val minAbsoluteDeltaHpa: Float = DEFAULT_MIN_ABSOLUTE_DELTA_HPA,
+    /** 单步气压变化的最小有效幅度。见 DEFAULT_MIN_STEP_DELTA_HPA。 */
+    private val minStepDeltaHpa: Float = DEFAULT_MIN_STEP_DELTA_HPA
 ) {
 
     fun compute(samples: List<PressureSample>): TrendResult {
@@ -201,8 +203,10 @@ class PressureTrendEngine(
             }
 
             // 高度增量按「相邻步」累加而不是按基线增量，否则基线之前的变化会被重复计入；
-            // 同时要求本步确实动了，避免爬升结束后基线仍偏高时把静止样本也计成事件。
-            if (fastChange && inVerticalTransit && stepDelta != 0f) {
+            // 同时要求本步幅度超过噪声底——真机实测平地段噪声单步 ≤0.02 hPa，
+            // 若不设这道门限，平地段会被计入大量 0.01 hPa 级的「事件」，
+            // 让 elevation_events 从真实 4 段虚高到 145 次。
+            if (fastChange && inVerticalTransit && abs(stepDelta) >= minStepDeltaHpa) {
                 elevationOffset += stepDelta
                 elevationEvents++
             }
@@ -317,6 +321,14 @@ class PressureTrendEngine(
          * 长窗口里真实天气变化远高于它，不会误伤。
          */
         const val DEFAULT_MIN_ABSOLUTE_DELTA_HPA = 0.5f
+
+        /**
+         * 单步幅度门限（hPa）。依据是真机实测的两组数：
+         *   平地段相邻 2 秒的噪声幅度 ≤ 0.02 hPa；
+         *   实测下楼单步 0.04–0.11 hPa、电梯单步约 0.40 hPa。
+         * 取 0.03 卡在中间：噪声被滤掉，真实垂直运动完整保留。
+         */
+        const val DEFAULT_MIN_STEP_DELTA_HPA = 0.03f
 
         private const val MS_PER_MINUTE = 60_000f
         private const val MS_PER_HOUR = 3_600_000f

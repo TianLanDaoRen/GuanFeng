@@ -233,7 +233,7 @@ fun GuanFengScreen() {
         Spacer(Modifier.height(8.dp))
         Text("高度解耦", color = Color(0xFFF2C14E), fontSize = 10.sp)
         InfoRow("天气样本", "${trend?.weatherSamples ?: 0} 个")
-        InfoRow("剔除高度事件", "${trend?.elevationEvents ?: 0} 次")
+        InfoRow("解耦样本数", "${trend?.elevationEvents ?: 0} 个")
         InfoRow("累计垂直位移", "%+.1f 米".format(trend?.elevationMeters ?: 0f))
         InfoRow("拟合优度 R²", "%.3f".format(trend?.fitRSquared ?: 0f))
 

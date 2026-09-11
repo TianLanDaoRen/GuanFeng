@@ -216,6 +216,40 @@ class PressureTrendEngineTest {
     }
 
     @Test
+    fun `平地段噪声不得把事件计数虚高`() {
+        // 复刻真机实测：26 楼到 1 楼的电梯往返共 4 段行程、真实电梯单步约 0.40 hPa，
+        // 而平地段噪声单步只有 0.01–0.02 hPa。若不给单步设门限，
+        // 平地段会被计入大量无意义事件（真机上曾从 4 段虚高到 145 次）。
+        val tickMs = 2_000L
+        // 抖动幅度对齐真机实测：相邻样本最大差 0.02 hPa（实测口径），低于 0.03 的单步门限。
+        val jitter = floatArrayOf(0f, 0.01f, -0.01f, 0.01f, -0.01f)
+        val samples = ArrayList<PressureSample>()
+        var pressure = 1000f
+
+        // 平地段 60 个样本
+        for (index in 0 until 60) {
+            samples += PressureSample(startMs + index * tickMs, pressure + jitter[index % jitter.size],
+                verticalAccel = 0.2f)
+        }
+        // 电梯下行 30 个样本，每步 +0.40 hPa（气压缩小即海拔降低方向相反）
+        for (index in 60 until 90) {
+            pressure += 0.40f
+            samples += PressureSample(startMs + index * tickMs, pressure + jitter[index % jitter.size],
+                verticalAccel = 0.9f)
+        }
+        // 平地段再 60 个样本
+        for (index in 90 until 150) {
+            samples += PressureSample(startMs + index * tickMs, pressure + jitter[index % jitter.size],
+                verticalAccel = 0.2f)
+        }
+
+        val result = PressureTrendEngine().compute(samples)
+
+        assertEquals("只该计出电梯那 30 步", 30, result.elevationEvents)
+        assertEquals(-100f, result.elevationMeters, 3f) // 12 hPa / 0.12 = 100 米
+    }
+
+    @Test
     fun `样本不足时不下结论`() {
         val result = PressureTrendEngine().compute(weatherSeries(3))
 

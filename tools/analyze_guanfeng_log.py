@@ -8,23 +8,27 @@
 
 它回答四个问题：
   1) 这次会话记录了多少、有没有断档（进程被杀或熄屏压制的痕迹）
-  2) 抓到了几段垂直运动（电梯 / 楼梯），各自位移多少米
+  2) 抓到几段垂直行程（电梯 / 楼梯），各自位移多少米、步态如何
   3) 解耦到底有没有生效——把「引擎给出的天气速率」与「对原始气压直接回归的朴素速率」
-     逐点对照：朴素速率在高度事件期间会飙高，引擎速率应当纹丝不动
-  4) 置信度闸门拦下了多少（可信 vs 窗口太短 / 趋势不稳）
+     逐点对照：朴素速率在行程期间会飙高，引擎速率应当纹丝不动
+  4) 置信度闸门拦下了多少
 
-输出是给人看的报告，可直接贴进复盘记录。
+关于切段的教训（别再踩）：
+第一版按 `elevation_events` 计数增长来切段——错的。平地段噪声也会让计数器缓慢增长，
+于是多段行程被粘成一段、起止位移互相抵消，报出「位移 -0.0 米」这种荒谬结论。
+正确做法是对「解耦位移曲线」做 ZigZag 拐点检测（阈值 2 米），只认显著行程。
 """
 
 import csv
-import glob
 import os
 import sys
 
 TICK_MS = 2000
 GAP_FACTOR = 3
 HPA_PER_METER = 0.12
-NAIVE_WINDOW = 45  # 朴素速率用最近 45 个样本（2 秒采样即 90 秒）做回归
+NAIVE_WINDOW = 45      # 朴素速率用最近 45 个样本（2 秒采样即 90 秒）做回归
+MIN_TRAVEL_M = 2.0     # ZigZag 拐点阈值：小于 2 米的往复视为噪声
+ELEVATOR_STEP_RATE = 0.15  # 步/秒 低于此值判为无步态（电梯）
 
 
 def load_rows(path):
@@ -44,6 +48,19 @@ def inum(value, default=0):
         return int(float(value))
     except (TypeError, ValueError):
         return default
+
+
+def sparkline(values, width=58):
+    """把一串数值压成一行字符，用于在终端里直接看时序形状。"""
+    if not values:
+        return ""
+    lo, hi = min(values), max(values)
+    chars = "▁▂▃▄▅▆▇█"
+    if hi - lo < 1e-9:
+        return chars[0] * min(len(values), width)
+    step = max(1, len(values) // width)
+    sampled = values[::step][:width]
+    return "".join(chars[int((v - lo) / (hi - lo) * 7.999)] for v in sampled)
 
 
 def naive_rate_hpa_per_hour(rows, index, window=NAIVE_WINDOW):
@@ -74,51 +91,72 @@ def find_gaps(rows):
     return gaps
 
 
-def find_elevation_episodes(rows):
-    """elevation_events 是累计值，所以它递增的连续行就是一次垂直运动事件。"""
-    episodes = []
-    current = None
-    last_count = inum(rows[0]["elevation_events"]) if rows else 0
-    for index, row in enumerate(rows):
-        count = inum(row["elevation_events"])
-        if count > last_count:
-            if current is None:
-                # 位移起点要取事件发生「之前」那一行的高度，
-                # 否则首行已经计入本次位移，会导致总位移少算一格。
-                previous_m = (
-                    fnum(rows[index - 1]["elevation_meters"]) if index > 0
-                    else fnum(row["elevation_meters"])
-                )
-                current = {
-                    "start": row["clock"],
-                    "end": row["clock"],
-                    "samples": 0,
-                    "steps": 0,
-                    "start_m": previous_m,
-                    "end_m": fnum(row["elevation_meters"]),
-                    "peak_naive": 0.0,
-                    "peak_engine": 0.0,
-                    "first_index": index,
-                }
-            current["end"] = row["clock"]
-            current["samples"] += count - last_count
-            current["end_m"] = fnum(row["elevation_meters"])
-            current["steps"] += inum(row["steps"])
-            current["last_index"] = index
-        elif current is not None:
-            episodes.append(current)
-            current = None
-        last_count = count
-    if current is not None:
-        episodes.append(current)
+def find_travel_legs(rows, min_travel_m=MIN_TRAVEL_M):
+    """
+    对「解耦位移曲线」做 ZigZag 拐点检测，把会话切成一段段行程。
+    不要改用 elevation_events 增长来切——那会被平地噪声粘成一段（见文件头教训）。
+    """
+    meters = [fnum(r["elevation_meters"]) for r in rows]
+    if len(meters) < 3:
+        return []
 
-    for episode in episodes:
-        for index in range(episode["first_index"], episode.get("last_index", episode["first_index"]) + 1):
-            naive = abs(naive_rate_hpa_per_hour(rows, index))
-            engine = abs(fnum(rows[index]["rate_hpa_per_hour"]))
-            episode["peak_naive"] = max(episode["peak_naive"], naive)
-            episode["peak_engine"] = max(episode["peak_engine"], engine)
-    return episodes
+    direction = 1 if meters[-1] >= meters[0] else -1
+    extreme = meters[0]
+    extreme_index = 0
+    points = []
+    for index, value in enumerate(meters):
+        if direction > 0:
+            if value > extreme:
+                extreme, extreme_index = value, index
+            elif extreme - value >= min_travel_m:
+                points.append((extreme_index, extreme))
+                direction = -1
+                extreme, extreme_index = value, index
+        else:
+            if value < extreme:
+                extreme, extreme_index = value, index
+            elif value - extreme >= min_travel_m:
+                points.append((extreme_index, extreme))
+                direction = 1
+                extreme, extreme_index = value, index
+    points.append((extreme_index, extreme))
+
+    legs = []
+    for order in range(1, len(points)):
+        start_index, start_value = points[order - 1]
+        end_index, end_value = points[order]
+        segment = rows[start_index:end_index + 1]
+        if not segment:
+            continue
+        duration_s = max(
+            1.0,
+            (inum(rows[end_index]["timestamp_ms"]) - inum(rows[start_index]["timestamp_ms"])) / 1000.0,
+        )
+        steps = sum(inum(r["steps"]) for r in segment)
+        # 用「步/秒」而非步数绝对值判别：电梯里也会被系统计到零星假步（实测 206 秒 12 步）。
+        step_rate = steps / duration_s
+        leg = {
+            "start": rows[start_index]["clock"],
+            "end": rows[end_index]["clock"],
+            "start_index": start_index,
+            "end_index": end_index,
+            "delta_m": end_value - start_value,
+            "steps": steps,
+            "duration_s": duration_s,
+            "step_rate": step_rate,
+            "peak_accel": max(fnum(r["vertical_accel"]) for r in segment),
+            "kind": "电梯/无步态" if step_rate < ELEVATOR_STEP_RATE else "楼梯/有步态",
+            "peak_naive": 0.0,
+            "peak_engine": 0.0,
+            "grades": {},
+        }
+        for index in range(start_index, end_index + 1):
+            leg["peak_naive"] = max(leg["peak_naive"], abs(naive_rate_hpa_per_hour(rows, index)))
+            leg["peak_engine"] = max(leg["peak_engine"], abs(fnum(rows[index]["rate_hpa_per_hour"])))
+            grade = rows[index]["grade"]
+            leg["grades"][grade] = leg["grades"].get(grade, 0) + 1
+        legs.append(leg)
+    return legs
 
 
 def report(path):
@@ -133,7 +171,18 @@ def report(path):
           f"{rows[0]['clock']} → {rows[-1]['clock']}")
 
     pressures = [fnum(r["pressure_hpa"]) for r in rows]
-    print(f"气压 {min(pressures):.2f} ~ {max(pressures):.2f} hPa（跨度 {max(pressures) - min(pressures):.2f}）")
+    print(f"气压 {min(pressures):.2f} ~ {max(pressures):.2f} hPa"
+          f"（总落差 {max(pressures) - min(pressures):.2f} hPa"
+          f" ≈ {(max(pressures) - min(pressures)) / HPA_PER_METER:.0f} 米垂直量程）")
+    print(f"气压时序  {sparkline(pressures)}")
+
+    meters = [fnum(r["elevation_meters"]) for r in rows]
+    if max(meters) - min(meters) > 0.5:
+        print(f"解耦位移  {sparkline(meters)}  （{min(meters):+.1f} ~ {max(meters):+.1f} 米）")
+
+    steps_series = [inum(r["steps"]) for r in rows]
+    if max(steps_series) > 0:
+        print(f"每窗步数  {sparkline(steps_series)}")
 
     gaps = find_gaps(rows)
     if gaps:
@@ -148,33 +197,37 @@ def report(path):
         key = row.get("confidence") or "未知"
         confidence_counts[key] = confidence_counts.get(key, 0) + 1
     total = len(rows)
-    summary = " · ".join(
+    print("置信度分布：" + " · ".join(
         f"{key} {value}（{value / total * 100:.0f}%）"
-        for key, value in sorted(confidence_counts.items(), key=lambda kv: -kv[1])
-    )
-    print(f"置信度分布：{summary}")
+        for key, value in sorted(confidence_counts.items(), key=lambda kv: -kv[1])))
 
-    episodes = find_elevation_episodes(rows)
-    print(f"垂直运动事件：{len(episodes)} 段")
-    for index, episode in enumerate(episodes, start=1):
-        delta_m = episode["end_m"] - episode["start_m"]
-        direction = "上升" if delta_m >= 0 else "下降"
-        print(f"  第 {index} 段 {episode['start']} → {episode['end']} · "
-              f"{episode['samples']} 个样本 · 位移 {delta_m:+.1f} 米（{direction}）· 步数 {episode['steps']}")
-        print(f"      朴素估算峰值 {episode['peak_naive']:.1f} hPa/h"
-              f"  ↔  引擎输出峰值 {episode['peak_engine']:.2f} hPa/h")
-        if episode["peak_naive"] > 5 and episode["peak_engine"] < 1.5:
-            print("      ✓ 解耦生效：朴素做法会误报剧变，引擎把它按住了")
-        elif episode["peak_naive"] > 5:
-            print("      ⚠ 解耦可能不完整：引擎速率仍然偏高，值得复查")
+    legs = find_travel_legs(rows)
+    print(f"垂直行程：{len(legs)} 段")
+    for index, leg in enumerate(legs, start=1):
+        direction = "上升" if leg["delta_m"] >= 0 else "下降"
+        print(f"  第 {index} 段 {leg['start']} → {leg['end']} · {leg['kind']} · "
+              f"{leg['duration_s']:.0f} 秒 · 位移 {leg['delta_m']:+.1f} 米（{direction}）· "
+              f"步数 {leg['steps']}（{leg['step_rate']:.2f} 步/秒）· 峰值加速度 {leg['peak_accel']:.2f}")
+        print(f"      朴素估算峰值 {leg['peak_naive']:.1f} hPa/h"
+              f"  ↔  引擎输出峰值 {leg['peak_engine']:.2f} hPa/h")
+        grade_summary = " · ".join(f"{k} {v}" for k, v in sorted(
+            leg["grades"].items(), key=lambda kv: -kv[1]))
+        print(f"      行程期间引擎判定：{grade_summary}")
+        if "急降" in leg["grades"] or "缓降" in leg["grades"] or "急升" in leg["grades"] or "缓升" in leg["grades"]:
+            print("      ⚠ 行程期间出现「升降」类判定——解耦可能不完整或被噪声干扰")
         else:
-            print("      · 朴素速率本身不高，这段事件偏温和（例如缓慢步行）")
+            print("      ✓ 行程期间判定未被高度变化带偏")
+        if leg["peak_naive"] > 5 and leg["peak_engine"] < 1.5:
+            print("      ✓ 解耦生效：朴素做法会误报剧变，引擎把它按住了")
 
     grade_counts = {}
     for row in rows:
-        key = row["grade"]
-        grade_counts[key] = grade_counts.get(key, 0) + 1
-    print("引擎判定分布：" + " · ".join(f"{k} {v}" for k, v in sorted(grade_counts.items(), key=lambda kv: -kv[1])))
+        grade_counts[row["grade"]] = grade_counts.get(row["grade"], 0) + 1
+    print("引擎判定分布：" + " · ".join(
+        f"{k} {v}" for k, v in sorted(grade_counts.items(), key=lambda kv: -kv[1])))
+
+    closed = abs(meters[-1] - meters[0])
+    print(f"往返闭合误差 {closed:.1f} 米（回到起点则接近 0）")
 
 
 def main(argv):
