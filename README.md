@@ -343,6 +343,13 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 
 ### 9.3 主动提醒与天气实况（校准闭环）
 
+- **主动提醒的平台限制（真机实测）**：手表的 SystemUI 有一道 `canPost` 白名单，
+  **只放行"手机同步过来的"通知**；应用自己发的本地通知进得了系统数据库却不上屏
+  （证据链见 oppo-watch skill 的 `oww221-probe-findings.md`）。
+  所以提醒拆成两条通道：**通知负责响与震**（系统会为它走提醒流程），
+  **indicator 负责让人看得见**（它走 `enqueueIndicatorNotification`，不受白名单限制）——
+  转坏时 indicator 文案直接变成「⚠ 可能转雨」。
+  设置里的「运营消息推送」只关 OPPO 自家应用的营销推送，与本项目无关。
 - **主动提醒**（`service/TrendNotifier`）：倾向升级到「高」时发一条普通通知，
   声音与震动由手表按用户设置处理，**应用不自建震动**。冷却 2 小时，回落后重新武装——
   被关掉通知的提醒等于不存在，所以宁可漏报也不刷屏。
