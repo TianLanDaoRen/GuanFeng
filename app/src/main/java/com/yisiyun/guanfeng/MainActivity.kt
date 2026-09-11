@@ -29,6 +29,18 @@ import com.yisiyun.guanfeng.ui.GuanFengApp
  */
 class MainActivity : ComponentActivity() {
 
+    /**
+     * 每次回到前台都让界面去查一次"有没有未确认的提醒"。
+     *
+     * 这是提醒链路的最后一环：手表的通知与 indicator 都被平台限制
+     * （通知被 canPost 白名单拦掉、indicator 只显示图标），
+     * 所以"发生了什么"只能等用户回到应用时讲清楚。
+     */
+    override fun onResume() {
+        super.onResume()
+        com.yisiyun.guanfeng.data.PendingAlertStore.checkNow()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.i(TAG, "onCreate sdk=${Build.VERSION.SDK_INT} model=${Build.MODEL}")

@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import com.yisiyun.guanfeng.R
+import com.yisiyun.guanfeng.data.PendingAlertStore
 import com.yisiyun.guanfeng.core.RainLikelihood
 import com.yisiyun.guanfeng.core.TrendResult
 import com.yisiyun.guanfeng.core.WeatherAssessment
@@ -53,6 +54,44 @@ object TrendNotifier {
     private var armed = true
     private var lastNotifiedAtMs = 0L
 
+    /**
+     * 直接驱动马达。
+     *
+     * 为什么不靠通知来震动：**手表的 SystemUI 有 canPost 白名单**，
+     * 第三方应用的本地通知连提醒流程都不走——真机实测点下去毫无震动
+     * （通知能进系统数据库、也留下了 mVibrateNotificationKey 记录，但马达没转）。
+     * 所以提醒的第一条腿是自己调 Vibrator。
+     */
+    fun vibrateAlert(context: Context) {
+        val audio = context.getSystemService(android.media.AudioManager::class.java)
+        // 静音模式（既不出声也不震）下不打扰——尊重用户的设置
+        if (audio?.ringerMode == android.media.AudioManager.RINGER_MODE_SILENT) return
+        val vibrator = context.getSystemService(android.os.Vibrator::class.java) ?: return
+        if (!vibrator.hasVibrator()) return
+        // 三短一长，与普通通知的"两下"区分开：不看表也能分辨是转坏提醒
+        val pattern = longArrayOf(0, 350, 200, 350, 200, 600)
+        runCatching {
+            vibrator.vibrate(android.os.VibrationEffect.createWaveform(pattern, -1))
+        }
+    }
+
+    /**
+     * 测试提醒：完整走一遍真实提醒的两条腿——**震动 + 落一条待确认提醒**。
+     *
+     * 通知这条路已被系统白名单堵死（实测毫无震动也不上屏），
+     * indicator 又只能显示图标、显示不了文字（主人实测更正），
+     * 所以真正能把"是什么事"讲清楚的只有应用内的确认弹窗。
+     * 这个测试按钮就是用来验证那整条链路的。
+     */
+    fun triggerTestAlert(context: Context) {
+        vibrateAlert(context)
+        PendingAlertStore.record(
+            context = context,
+            title = "测试提醒（手动触发）",
+            text = "若你在应用内看到这条并点了「我已知晓」，说明整条提醒链路是通的。",
+        )
+    }
+
     fun ensureChannel(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         manager.deleteNotificationChannel(LEGACY_CHANNEL_ID)
@@ -89,19 +128,20 @@ object TrendNotifier {
         if (nowMs - lastNotifiedAtMs < MIN_INTERVAL_MS) return
 
         val delta = trend?.deltaHpaPer3h ?: 0f
-        val posted = post(
-            context = context,
-            title = "气压急降 · 可能转雨",
-            text = buildString {
-                append("3 小时变压 %+.1f hPa".format(delta))
-                append(" · ").append(assessment.advice)
-                if (trend?.confidence != null) append(" · ").append(assessment.shortReason)
-            },
-        )
-        if (posted) {
-            armed = false
-            lastNotifiedAtMs = nowMs
+        val body = buildString {
+            append("3 小时变压 %+.1f hPa".format(delta))
+            append(" · ").append(assessment.advice)
+            append(" · ").append(assessment.shortReason)
         }
+        // 第一条腿：直接震动——实测唯一真的能让人感觉到的通道
+        vibrateAlert(context)
+        // 第二条腿：落一条待确认提醒，用户切回应用时弹出，点「我已知晓」才消失。
+        // 这才是真正能把信息讲清楚的那条路（通知与 indicator 都做不到）。
+        PendingAlertStore.record(context, "气压急降 · 可能转雨", body, nowMs)
+        // indicator 文案仍更新一份（只有图标会显示，但通知记录里留痕，便于事后核对）
+        AlertState.requestRefresh()
+        armed = false
+        lastNotifiedAtMs = nowMs
     }
 
     private fun post(context: Context, title: String, text: String): Boolean = runCatching {
@@ -129,46 +169,6 @@ object TrendNotifier {
         manager.notify(NOTIFICATION_ID, notification)
         true
     }.getOrDefault(false)
-
-    /**
-     * 诊断：通知到底有没有被系统允许。
-     *
-     * 加它的原因很实际：主人点了两次测试提醒都没看见通知，而"通知被禁"与
-     * "通知发了但没弹"是两种完全不同的故障，界面上必须能区分，
-     * 否则只能靠猜——那是最浪费时间的排查方式。
-     */
-    fun diagnose(context: Context): String {
-        val enabled = runCatching {
-            androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
-        }.getOrDefault(true)
-        if (!enabled) return "通知已被系统关闭 ⚠ 请到设置里为本应用打开通知"
-        val manager = context.getSystemService(NotificationManager::class.java)
-        val channel = manager?.getNotificationChannel(CHANNEL_ID)
-        val importance = when (channel?.importance) {
-            NotificationManager.IMPORTANCE_HIGH -> "横幅"
-            NotificationManager.IMPORTANCE_DEFAULT -> "普通"
-            NotificationManager.IMPORTANCE_LOW -> "静音"
-            NotificationManager.IMPORTANCE_MIN -> "最低"
-            null -> "渠道未创建"
-            else -> "其它"
-        }
-        return "通知已允许 · 渠道 $importance"
-    }
-
-    /**
-     * 手动发一条测试通知。
-     *
-     * 存在的理由：真实触发条件（倾向升到「高」）可能要等好几天才遇到一次，
-     * 而"通知在 ColorOS Watch 上到底会不会响/弹"必须尽早验证。
-     * 这条走同一条渠道、同一套构建逻辑，只是内容标明是测试。
-     */
-    fun sendTestNotification(context: Context) {
-        post(
-            context = context,
-            title = "测试提醒（手动触发）",
-            text = "若你能看到这条通知，说明渠道与权限都正常",
-        )
-    }
 
     /** 供测试或状态重置使用。 */
     fun resetForTest() {

@@ -9,6 +9,12 @@
     <!-- 计步与步态检测 -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <!-- 前台保活：官方口径「不支持后台运行」，重要记录须走前台服务 -->
+    <!--
+      直接驱动马达。为什么不用通知来震动：手表 SystemUI 的 canPost 白名单
+      把第三方本地通知全部拦掉（实测连提醒流程都不走、点了毫无震动），
+      所以只能自己调。
+    -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
     <!-- Android 13+ 才需要运行时申请；API 30 设备上为无害声明 -->

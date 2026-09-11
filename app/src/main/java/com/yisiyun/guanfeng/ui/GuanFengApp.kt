@@ -7,6 +7,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import com.yisiyun.guanfeng.data.PendingAlert
+import com.yisiyun.guanfeng.data.PendingAlertStore
+import com.yisiyun.guanfeng.ui.components.AlertConfirmOverlay
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -37,6 +45,15 @@ private const val PAGE_COUNT = 5
 fun GuanFengApp() {
     val state by PressureRecorder.state.collectAsState()
     val pagerState = rememberPagerState(pageCount = { PAGE_COUNT })
+
+    val context = LocalContext.current
+    val alertSignal by PendingAlertStore.signal.collectAsState()
+    // 提醒覆盖在最上层：它必须盖住翻页符与整页内容，否则又会重演"弹层看不见"
+    var pendingAlert by remember { mutableStateOf<PendingAlert?>(null) }
+    LaunchedEffect(alertSignal) {
+        // 信号有两个来源：提醒新产生、以及应用回到前台（MainActivity.onResume）
+        pendingAlert = PendingAlertStore.load(context)
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         HorizontalPager(
@@ -70,6 +87,17 @@ fun GuanFengApp() {
                         .background(if (active) Color(0xFFB4B4B4) else Color(0xFF3A3A3A)),
                 )
             }
+        }
+
+        // 待确认提醒：整页覆盖，点「我已知晓」才消失
+        pendingAlert?.let { alert ->
+            AlertConfirmOverlay(
+                alert = alert,
+                onAcknowledge = {
+                    PendingAlertStore.acknowledge(context)
+                    pendingAlert = null
+                },
+            )
         }
     }
 }

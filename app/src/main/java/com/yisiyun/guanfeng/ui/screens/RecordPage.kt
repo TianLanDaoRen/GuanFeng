@@ -118,13 +118,13 @@ fun RecordPage(state: RecorderState) {
                 .height(30.dp)
                 .background(Color(0xFF2A2A1E), RoundedCornerShape(15.dp))
                 .clickable {
-                    // 延迟 5 秒再发：应用在前台时通知横幅没有地方可画，
-                    // 主人也看不到通知栏。给 5 秒退回表盘，才能验证真实呈现。
-                    noticeFeedback = "5 秒后发送，请退回表盘"
+                    // 通知这条路已被系统白名单堵死（实测点了毫无震动），
+                    // 所以测试改为验证真正要用的两条腿：**马达震动 + indicator 文案**。
+                    TrendNotifier.triggerTestAlert(context)
+                    noticeFeedback = "已震动 · indicator 显示 20 秒"
                     scope.launch {
-                        delay(5_000)
-                        TrendNotifier.sendTestNotification(context)
-                        noticeFeedback = "已发送 · " + TrendNotifier.diagnose(context)
+                        delay(20_000)
+                        noticeFeedback = "测试窗口结束"
                     }
                 },
             contentAlignment = Alignment.Center,
@@ -135,7 +135,7 @@ fun RecordPage(state: RecorderState) {
             text = if (noticeFeedback.isNotEmpty()) {
                 noticeFeedback
             } else {
-                "5 秒后发送（便于退回表盘查看）· " + TrendNotifier.diagnose(context)
+                "震动 + indicator 文案（通知已被系统白名单拦掉，不再依赖它）"
             },
             color = Color(0xFF6E6E6E),
             fontSize = 7.sp,

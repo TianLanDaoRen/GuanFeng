@@ -16,6 +16,7 @@ import com.yisiyun.guanfeng.R
 import com.yisiyun.guanfeng.data.PressureRecorder
 import com.yisiyun.guanfeng.data.RecorderState
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -39,6 +40,7 @@ import kotlinx.coroutines.launch
 class WatchSessionService : Service() {
 
     private var notificationJob: Job? = null
+    private var alertScope: CoroutineScope? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -53,6 +55,20 @@ class WatchSessionService : Service() {
         PressureRecorder.start(applicationContext)
         startNotificationUpdates()
         Log.i(TAG, "已进入前台并挂上 indicator")
+        // 提醒发生时要立刻刷新 indicator（默认按行数分桶最快要几十秒），
+        // 所以订阅一个刷新信号，收到就重建通知。scope 存下来，销毁时取消，避免泄漏。
+        alertScope?.cancel()
+        alertScope = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { scope ->
+            scope.launch {
+                AlertState.refresh.collect {
+                    val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    manager.notify(
+                        NOTIFICATION_ID,
+                        buildIndicatorNotification(PressureRecorder.state.value),
+                    )
+                }
+            }
+        }
         // 进程若被系统回收，尝试自动重建，保证长期记录不轻易断档。
         return START_STICKY
     }
@@ -61,6 +77,8 @@ class WatchSessionService : Service() {
         Log.i(TAG, "服务销毁，停止采集")
         notificationJob?.cancel()
         notificationJob = null
+        alertScope?.cancel()
+        alertScope = null
         PressureRecorder.stop()
         super.onDestroy()
     }
@@ -115,9 +133,10 @@ class WatchSessionService : Service() {
         )
 
         val extras = Bundle().apply { putBoolean(EXTRA_SHOW_INDICATOR, true) }
-        // 提醒优先走 indicator：实测"转坏提醒"那条通知确实发出去、系统也震动了，
-        // 但**横幅在 ColorOS Watch 上不一定看得到**；而 indicator 是唯一
-        // 被真机证明"一定会出现在表盘顶部"的通道。所以把结论写进它的文案里。
+        // 更正一个曾被我想当然的前提：**indicator 只显示图标，不显示任何文字**
+        // （主人在真机上确认）。所以这里写进文案不是为了在表盘上读，
+        // 而是让通知记录里留下"当时是什么状态"，便于事后核对；
+        // 真正传递信息的是应用内的待确认提醒。
         val alert = alertText(state)
         val text = when {
             alert != null && state != null -> "$alert · 已记录 ${state.loggedRows} 行"
@@ -145,6 +164,8 @@ class WatchSessionService : Service() {
 
     /** 转坏时给 indicator 的提示语；正常时返回 null。 */
     private fun alertText(state: com.yisiyun.guanfeng.data.RecorderState?): String? {
+        // 测试窗口优先：让主人能立刻看到"真的转坏时"indicator 长什么样
+        AlertState.activeTestLabel()?.let { return it }
         val formal = state?.trend?.let { com.yisiyun.guanfeng.core.WeatherRule.assess(it) }
         val fast = state?.trendFast?.let { com.yisiyun.guanfeng.core.WeatherRule.assess(it) }
         val active = if (formal != null &&
