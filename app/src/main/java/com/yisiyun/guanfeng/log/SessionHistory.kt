@@ -81,19 +81,23 @@ object SessionHistory {
         return collected.toList()
     }
 
-    /** 删除超过保留期的会话文件。长期连续记录必须有这条，否则 ROM 会被慢慢撑满。 */
-    fun pruneOldSessions(context: Context, keepDays: Int): Int {
-        if (keepDays <= 0) return 0
+    /**
+     * 裁剪原始会话文件：**保留最近 [keepFiles] 个**（主人的建议）。
+     *
+     * 为什么敢按个数删而不是按天数：长期趋势已经由 [HourlyArchive] 承担，
+     * 那里只存小时汇总、约 1 KB/天、永不删除；原始文件只服务"最近 3 小时趋势窗口"，
+     * 30 个文件足够覆盖。两者职责分开，就不会出现"删文件就没历史"的死结。
+     *
+     * 注意：`hourly.csv` 前缀不是 `guanfeng_`，因此天然不受这里影响。
+     */
+    fun pruneOldSessions(context: Context, keepFiles: Int = KEPT_SESSION_FILES): Int {
+        if (keepFiles <= 0) return 0
         val directory = context.getExternalFilesDir(null) ?: context.filesDir
-        val cutoffMs = System.currentTimeMillis() - keepDays.toLong() * 24 * 60 * 60 * 1000
-        var removed = 0
-        directory.listFiles { file ->
-            file.isFile && file.name.startsWith(FILE_PREFIX) && file.name.endsWith(FILE_SUFFIX) &&
-                file.lastModified() < cutoffMs
-        }?.forEach { file ->
-            if (runCatching { file.delete() }.getOrDefault(false)) removed++
-        }
-        return removed
+        val files = directory.listFiles { candidate ->
+            candidate.isFile && candidate.name.startsWith(FILE_PREFIX) &&
+                candidate.name.endsWith(FILE_SUFFIX)
+        }?.sortedByDescending { it.lastModified() } ?: return 0
+        return files.drop(keepFiles).count { runCatching { it.delete() }.getOrDefault(false) }
     }
 
     /** 从磁盘恢复：按修改时间从新到旧读会话文件，凑满窗口即停。 */
@@ -184,6 +188,9 @@ object SessionHistory {
 
     /** 传这个天数表示「全部可用历史」，不受时间窗裁剪。 */
     const val ALL_HISTORY_DAYS = 100_000
+
+    /** 原始会话文件保留数量：只服务最近 3 小时趋势窗口，30 个绰绰有余。 */
+    const val KEPT_SESSION_FILES = 30
 
     /** 读取最近一段时间的**原始环境光**读数，用于启动时立刻恢复光照趋势。 */
     fun loadRecentLight(

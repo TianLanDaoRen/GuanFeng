@@ -43,8 +43,10 @@ import com.yisiyun.guanfeng.core.CheckInRecord
 import com.yisiyun.guanfeng.core.HourlyAccumulator
 import com.yisiyun.guanfeng.core.HourlyBucket
 import com.yisiyun.guanfeng.data.CheckInSignal
+import com.yisiyun.guanfeng.data.PressureRecorder
 import com.yisiyun.guanfeng.data.RecorderState
 import com.yisiyun.guanfeng.log.CheckInHistory
+import com.yisiyun.guanfeng.log.HourlyArchive
 import com.yisiyun.guanfeng.log.SessionHistory
 import com.yisiyun.guanfeng.ui.components.MarkdownText
 import java.util.TimeZone
@@ -81,6 +83,9 @@ private object AssociationCache {
     /** 全部可用历史口径：AI 报告要两段都给。 */
     var allSummary: AssociationSummary? = null
     var checkIns: List<CheckInRecord> = emptyList()
+    /** 小时归档（含体感分量），AI 报告的 body_context 用它。 */
+    var hourlyRows: List<com.yisiyun.guanfeng.core.HourlyRow> = emptyList()
+    var recentFromMs: Long = 0L
 }
 
 private const val DAY_MS = 24L * 60L * 60L * 1000L
@@ -122,15 +127,17 @@ fun AssociationPage(state: RecorderState) {
         loading = true
         val zoneOffsetMs = TimeZone.getDefault().getOffset(now).toLong()
         val computed = withContext(Dispatchers.Default) {
-            // 一次扫描拿到全部可用历史，再切出近 7 天——
-            // 而不是扫两遍（原始样本量级是十万行，扫两遍纯属浪费）。
-            val allBuckets = SessionHistory.loadHourlyRollup(
-                context,
-                SessionHistory.ALL_HISTORY_DAYS,
-                now,
+            // 长期历史读**小时归档**（约 1 KB/天、永不删除），不再扫十万行原始样本；
+            // 再补上尚未落盘的当前小时，否则最近一小时在图上永远是空的。
+            val allRows = HourlyArchive.dedupeByHour(
+                HourlyArchive.loadAll(context) + listOfNotNull(PressureRecorder.currentHourRow())
             )
             val recentFromMs = now - PERIOD_DAYS * DAY_MS
-            val recentBuckets = allBuckets.filter { it.hourStartMs >= recentFromMs }
+            val toBucket = { row: com.yisiyun.guanfeng.core.HourlyRow ->
+                HourlyBucket(row.hourStartMs, row.weatherAvgHpa, row.weatherMinHpa, row.weatherMaxHpa, row.samples)
+            }
+            val allBuckets = allRows.map(toBucket)
+            val recentBuckets = allRows.filter { it.hourStartMs >= recentFromMs }.map(toBucket)
             val checkIns = CheckInHistory.loadRecent(context, SessionHistory.ALL_HISTORY_DAYS, now)
             val spanDays = if (allBuckets.isEmpty()) 0 else {
                 ((allBuckets.last().hourStartMs - allBuckets.first().hourStartMs) / DAY_MS).toInt() + 1
@@ -139,11 +146,15 @@ fun AssociationPage(state: RecorderState) {
                 recent = AssociationAnalyzer.analyze(recentBuckets, checkIns, PERIOD_DAYS, zoneOffsetMs),
                 all = AssociationAnalyzer.analyze(allBuckets, checkIns, spanDays, zoneOffsetMs),
                 checkIns = checkIns,
+                hourlyRows = allRows,
+                recentFromMs = recentFromMs,
             )
         }
         AssociationCache.summary = computed.recent
         AssociationCache.allSummary = computed.all
         AssociationCache.checkIns = computed.checkIns
+        AssociationCache.hourlyRows = computed.hourlyRows
+        AssociationCache.recentFromMs = computed.recentFromMs
         AssociationCache.computedAtMs = now
         AssociationCache.version = checkInVersion
         summary = computed.recent
@@ -184,6 +195,8 @@ fun AssociationPage(state: RecorderState) {
                         recent = snapshot,
                         checkIns = checkIns,
                         zoneOffsetMs = zoneOffsetMs,
+                        hourlyRows = AssociationCache.hourlyRows,
+                        recentFromMs = AssociationCache.recentFromMs,
                     )
                 ),
                 onDelta = { delta -> reportFlow.value += delta },
@@ -300,9 +313,10 @@ fun AssociationPage(state: RecorderState) {
             title = { Text("需要联网", fontSize = 13.sp, color = Color.White) },
             text = {
                 Text(
-                    text = "将把本页的聚合统计（天数、气压极值、打卡次数与标签分布）" +
-                        "发到 yunsisanren.top 做一次分析。\n" +
-                        "不含逐条打卡记录、备注原文与体征逐点数据。",
+                    text = "将把这些聚合统计发到 yunsisanren.top 做一次分析：\n" +
+                        "· 气压与打卡的天数、极值、次数、标签分布\n" +
+                        "· 心率 / 腕温 / 光照的**小时级**统计（不是逐点读数）\n" +
+                        "不含逐条打卡记录、备注原文、体征逐点数据与任何身份标识。",
                     fontSize = 9.sp,
                     color = Color(0xFFC8C8C8),
                     lineHeight = 12.sp,
@@ -447,9 +461,11 @@ private fun PressureCheckInChart(
     }
 }
 
-/** 一次扫描算出的两段口径。 */
+/** 一次读取算出的两段口径与体感归档。 */
 private data class ComputedAssociation(
     val recent: AssociationSummary,
     val all: AssociationSummary,
     val checkIns: List<CheckInRecord>,
+    val hourlyRows: List<com.yisiyun.guanfeng.core.HourlyRow>,
+    val recentFromMs: Long,
 )

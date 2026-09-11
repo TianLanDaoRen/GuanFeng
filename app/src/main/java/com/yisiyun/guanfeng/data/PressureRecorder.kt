@@ -6,11 +6,14 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.util.Log
+import com.yisiyun.guanfeng.core.HourAccumulator
+import com.yisiyun.guanfeng.core.HourlyRow
 import com.yisiyun.guanfeng.core.PressureSample
 import com.yisiyun.guanfeng.core.PressureTrendEngine
 import com.yisiyun.guanfeng.core.SampleAggregator
 import com.yisiyun.guanfeng.core.TrendResult
 import com.yisiyun.guanfeng.log.CsvSessionLogger
+import com.yisiyun.guanfeng.log.HourlyArchive
 import com.yisiyun.guanfeng.log.SessionHistory
 import kotlin.math.abs
 import kotlin.math.max
@@ -115,8 +118,7 @@ object PressureRecorder {
     /** 恢复历史时：超过这个间隔视为断档，断档之前的数据一律不接（跨空洞拟合会造出假趋势）。 */
     private const val MAX_GAP_MS = 5L * 60L * 1000L
 
-    /** 会话文件保留天数。5 秒采样约 2 MB/天，留 30 天即可覆盖绝大多数回看需求。 */
-    private const val KEEP_DAYS = 30
+    /** 会话文件保留天数已由「保留最近 N 个文件」取代，见 SessionHistory.pruneOldSessions。 */
 
     /** 内存里保留的样本上限（4 小时容量，比窗口多留一档余量）。 */
     private val MAX_SAMPLES = (4 * 60 * 60 * 1000L / SAMPLE_INTERVAL_MS).toInt()
@@ -158,6 +160,9 @@ object PressureRecorder {
     /** 腕温的慢速滑动均值：腕温绝对值没有天气含义（环境与衣袖混淆最大），只能与自身基线比较。 */
     private var wristTempBaseline: Float? = null
     private var wristTempReadings = 0
+
+    /** 小时归档累加器：整点切换时把上一小时落盘（长期历史靠它，原始文件可以放心裁剪）。 */
+    private val hourAccumulator = HourAccumulator()
 
     // 传感器原始读数
     private var latestPressure: Float? = null
@@ -204,8 +209,9 @@ object PressureRecorder {
         scope = newScope
         newScope.launch {
             val restored = runCatching {
-                // 先按保留策略清掉过期会话文件，避免 32GB ROM 被日积月累撑满
-                SessionHistory.pruneOldSessions(applicationContext, KEEP_DAYS)
+                // 原始会话文件按「保留最近 N 个」裁剪；长期历史由小时归档承担，
+                // 所以这里可以放心删旧文件，不会丢长期趋势。
+                SessionHistory.pruneOldSessions(applicationContext)
                 SessionHistory.loadRecent(applicationContext, startedAtMs, WINDOW_MS, MAX_GAP_MS)
             }.getOrElse { error ->
                 Log.w(TAG, "读取历史样本失败: $error")
@@ -228,6 +234,19 @@ object PressureRecorder {
             seededLight.lastOrNull()?.let { lightLux = it.second }
             Log.i(TAG, "回填光照读数 ${seededLight.size} 个")
 
+            // 一次性迁移：小时归档为空时，用已有原始文件把历史补齐（旧文件只有气压）
+            if (HourlyArchive.loadAll(applicationContext).isEmpty()) {
+                val seeded = HourlyArchive.seed(
+                    applicationContext,
+                    SessionHistory.loadHourlyRollup(
+                        applicationContext,
+                        SessionHistory.ALL_HISTORY_DAYS,
+                        startedAtMs,
+                    ),
+                )
+                if (seeded > 0) Log.i(TAG, "小时归档迁移：从原始文件补齐 $seeded 个小时")
+            }
+
             registerSensors(manager)
 
             _state.value = _state.value.copy(restoredSamples = restored.size)
@@ -247,9 +266,26 @@ object PressureRecorder {
         sampleJob = null
         sensorManager = null
         started = false
+        // 停机前把当前这个不完整的小时也归档：否则每次重启都会丢掉最后一段，
+        // 而那些正是用户刚刚经历的时间。
+        flushCurrentHour()
         _state.value = _state.value.copy(recording = false)
         Log.i(TAG, "采集已停止，本次共落盘 ${logger?.rowCount ?: 0} 行")
     }
+
+    /** 把当前未完成的小时写进归档（停机时调用）。 */
+    @Synchronized
+    private fun flushCurrentHour() {
+        val row = hourAccumulator.snapshot() ?: return
+        appContext?.let { HourlyArchive.append(it, row) }
+    }
+
+    /**
+     * 当前尚未落盘的那个小时的归档行。
+     * 关联视图与 AI 报告要用它补上"最后一小时"——归档只在整点切换时追加，
+     * 不补的话最近一小时永远是空的。
+     */
+    fun currentHourRow(): HourlyRow? = hourAccumulator.snapshot()
 
     fun isRunning(): Boolean = started
 
@@ -408,6 +444,22 @@ object PressureRecorder {
             // 由调用方累加起来，就得到与窗口无关的、只含天气分量的气压。
             formal.lastElevationStepHpa?.let { elevationOffsetHpa += it }
             val weatherPressure = sample.pressureHpa - elevationOffsetHpa
+
+            // 小时归档：整点切换时把上一小时落盘。
+            // 体感数据也一并归档——AI 报告需要它们来判断混淆因素（例如头痛是否来自发热）。
+            // 心率/腕温/光照取 liveLoop 写入的最新读数（它们比 5 秒聚合节奏快）。
+            val latest = _state.value
+            hourAccumulator.add(
+                timestampMs = sample.timestampMs,
+                weatherHpa = weatherPressure,
+                rawHpa = sample.pressureHpa,
+                heartRateBpm = latest.heartRateBpm,
+                restingHeartRateBpm = restingBaseline,
+                wristTempC = latest.wristTemperatureC,
+                lightLux = latest.lightLux,
+            )?.let { completed ->
+                appContext?.let { HourlyArchive.append(it, completed) }
+            }
 
             val written = logger?.append(
                 timestampMs = sample.timestampMs,

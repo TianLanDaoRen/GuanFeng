@@ -17,17 +17,22 @@ object AiDigest {
     /**
      * 生成紧凑 JSON（手写而非 org.json：内核保持纯 Kotlin，才能跑 JVM 单测）。
      *
-     * 两段口径：
-     *   · `all_history`——全部可用历史（受本地原始数据保留期限制）
-     *   · `recent_7_days`——近 7 天
-     * 之所以分两段：主人的要求是「既看全局也看近期」。
-     * 长期数据能看出反复出现的模式，近期数据更贴近当前状态，两者混在一起反而看不清。
+     * 三段口径：
+     *   · `all_history`——全部可用历史（来自小时归档，不受原始文件裁剪影响）
+     *   · `recent_7_days`——近 7 天（含每日气压极值明细）
+     *   · `body_context`——体感与环境：心率、腕温、光照的**小时级统计与明细**
+     *
+     * 为什么要带体感：主人的判断是对的——头痛未必来自气压，也可能是发热（腕温升高）。
+     * 只给气压，AI 就没法排除混淆因素，只能在气压里硬找关联。
+     * 带上的都是**抗离群的中位数与极值**，不是瞬时值：袖子上翻一次就能让瞬时腕温跳好几度。
      */
     fun build(
         allHistory: AssociationSummary,
         recent: AssociationSummary,
         checkIns: List<CheckInRecord>,
         zoneOffsetMs: Long,
+        hourlyRows: List<HourlyRow> = emptyList(),
+        recentFromMs: Long = 0L,
     ): String {
         val tagCounts = checkIns.groupingBy { it.tags }.eachCount()
         val intensityCounts = checkIns.groupingBy { it.intensity }.eachCount()
@@ -42,9 +47,65 @@ object AiDigest {
         builder.append("\"check_in_tags\":").append(countObject(tagCounts))
         builder.append(',')
         builder.append("\"check_in_intensity\":").append(countObject(intensityCounts))
+        if (hourlyRows.isNotEmpty()) {
+            builder.append(',')
+            builder.append("\"body_context\":").append(bodyContext(hourlyRows, recentFromMs))
+        }
         builder.append('}')
         return builder.toString()
     }
+
+    /**
+     * 体感与环境：两段概要 + 近期的**小时级明细**。
+     *
+     * 明细是有意给的：AI 最擅长的就是从序列里找模式，把小时级序列交给它，
+     * 比我们自己先下结论更有价值。代价很小——一周 168 行、约 7 KB。
+     */
+    private fun bodyContext(rows: List<HourlyRow>, recentFromMs: Long): String {
+        val recent = rows.filter { it.hourStartMs >= recentFromMs }
+        val builder = StringBuilder()
+        builder.append('{')
+        builder.append(
+            "\"caveat\":\"腕温与光照受环境与佩戴影响很大（衣袖遮挡、空调房、洗手都会造成离群），" +
+                "故一律给中位数与极值，不给瞬时值；心率中不区分静息与活动时须结合静息基线看\""
+        )
+        builder.append(",\"all_history\":").append(bodySummaryJson(BodyStats.summarize(rows)))
+        builder.append(",\"recent_7_days\":").append(bodySummaryJson(BodyStats.summarize(recent)))
+        builder.append(",\"hourly_series_7d\":[")
+        builder.append(
+            recent.joinToString(",") { row ->
+                buildString {
+                    append("{\"t\":").append(row.hourStartMs)
+                    append(",\"p\":%.1f".format(row.weatherAvgHpa))
+                    append(",\"pmin\":%.1f".format(row.weatherMinHpa))
+                    append(",\"pmax\":%.1f".format(row.weatherMaxHpa))
+                    row.heartRateAvg?.let { append(",\"hr\":%.0f".format(it)) }
+                    row.restingHeartRate?.let { append(",\"rhr\":%.0f".format(it)) }
+                    row.wristTempAvg?.let { append(",\"wt\":%.2f".format(it)) }
+                    row.wristTempMin?.let { append(",\"wtmin\":%.2f".format(it)) }
+                    row.lightAvgLux?.let { append(",\"lux\":%.0f".format(it)) }
+                    append('}')
+                }
+            }
+        )
+        builder.append(']')
+        builder.append('}')
+        return builder.toString()
+    }
+
+    private fun bodySummaryJson(summary: BodySummary): String = buildString {
+        append('{')
+        append("\"hourly_rows\":").append(summary.hourlyRows)
+        summary.restingHeartRate?.let { append(",\"resting_hr_bpm\":").append(statJson(it)) }
+        summary.heartRate?.let { append(",\"heart_rate_bpm\":").append(statJson(it)) }
+        summary.wristTemperature?.let { append(",\"wrist_temp_c\":").append(statJson(it)) }
+        summary.light?.let { append(",\"light_lux\":").append(statJson(it)) }
+        append('}')
+    }
+
+    private fun statJson(stat: StatSummary): String =
+        "{\"median\":%.2f,\"min\":%.2f,\"max\":%.2f,\"hours\":%d}"
+            .format(stat.median, stat.min, stat.max, stat.count)
 
     private fun scopeObject(
         summary: AssociationSummary,
@@ -89,9 +150,9 @@ object AiDigest {
      * 第 5 条要求分段作答，因为主人明确要「既看全局也看近期」。
      */
     fun buildSystemInstruction(): String = """
-        你是数据分析助手。用户会给你两段「气压」与「自报不适」的聚合统计：
-        `all_history`（全部可用历史）与 `recent_7_days`（近 7 天），
-        都不含逐条原始记录与身份信息。
+        你是数据分析助手。用户会给你三部分聚合统计：
+        `all_history`（全部可用历史）、`recent_7_days`（近 7 天）、
+        `body_context`（心率/腕温/光照的小时级统计与明细）。都不含逐条原始记录与身份信息。
 
         严格遵守：
         1. 只做描述性分析，措辞限于「数据显示…可能有关联…建议继续观察」；
@@ -100,6 +161,9 @@ object AiDigest {
         3. 中文，200 字以内，分三段：全局（all_history）观察 / 近期（recent_7_days）观察 /
            一条可执行的建议。若两段样本量差异大，点明哪一段更可靠。
         4. 不要使用表格、代码块或长列表——阅读终端是一块很小的手表屏幕。
+        5. `body_context` 是**用来排除混淆因素**的：例如头痛若同时伴随腕温升高，
+           发热就是不能排除的解释；若心跳与体温都正常，则气压变化的解释相对更强。
+           提到体感数据时要说明其局限（腕温受环境与衣袖影响）。
     """.trimIndent()
 
     /** 用户内容：只带聚合统计。 */
