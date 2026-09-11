@@ -4,10 +4,15 @@
     <!-- OPPO 硬约束：手表应用必须在 Manifest 声明 watch feature -->
     <uses-feature android:name="android.hardware.type.watch" />
 
-    <!-- 心率传感器需要运行时授权（探针会主动申请并观察回调） -->
+    <!-- 心率 / PPG 等体征传感器需要运行时授权 -->
     <uses-permission android:name="android.permission.BODY_SENSORS" />
-    <!-- 计步类传感器需要；探针顺手验证 ACTIVITY_RECOGNITION 的授权链路 -->
+    <!-- 计步与步态检测 -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <!-- 前台保活：官方口径「不支持后台运行」，重要记录须走前台服务 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <!-- Android 13+ 才需要运行时申请；API 30 设备上为无害声明 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
@@ -34,6 +39,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 记录用前台服务：挂 indicator，防止熄屏后被系统回收导致记录断档 -->
+        <service
+            android:name=".service.WatchSessionService"
+            android:exported="false"
+            android:foregroundServiceType="health" />
     </application>
 
 </manifest>
