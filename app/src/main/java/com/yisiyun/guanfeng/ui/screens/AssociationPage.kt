@@ -304,62 +304,73 @@ fun AssociationPage(state: RecorderState) {
                 onRetry = { startReport() },
             )
         }
-    }
 
-    if (showConsent) {
-        // 自定义弹层而不是 Material AlertDialog：后者在 189dp 宽的表盘上
-        // 会把长文案直接裁掉（实测最后一行被切），而且不吃 Markdown——
-        // 我在文案里写的 **小时级** 于是原样露出了星号。
-        // 自己的弹层可以做到：可滚动、尺寸受控、样式与其余界面一致、文案里不放任何标记。
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFF0A0A0A))
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+        // 同意弹层必须画在这个 Box **里面**。
+        // 原先写成 Box 的兄弟节点，结果在 pager 页面里根本显示不出来——
+        // 而上面这个报告浮层是画在 Box 内、真机验证过能显示的。结构对齐才是正解。
+        if (showConsent) {
+            ConsentOverlay(
+                onCancel = { showConsent = false },
+                onConfirm = {
+                    showConsent = false
+                    startReport()
+                },
+            )
+        }
+    }
+}
+
+/** 联网同意弹层：整页覆盖、可滚动、文案不含任何 Markdown 标记。 */
+@Composable
+private fun ConsentOverlay(onCancel: () -> Unit, onConfirm: () -> Unit) {
+    // 不用 Material AlertDialog：它在 189dp 宽的表盘上会把长文案**直接裁掉**
+    // （实测最后一行整个消失），而且不渲染 Markdown——文案里的 **加粗** 会原样露出星号。
+    // 自己搭的好处：尺寸可控、可滚动兜底、样式与其余界面一致。
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0A0A0A))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Text("需要联网", color = Color.White, fontSize = 13.sp)
+        Spacer(Modifier.height(6.dp))
+        Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+            Text(
+                text = "将上传：" + "\n" +
+                    "· 气压与打卡的统计（天数、极值、次数、标签分布）" + "\n" +
+                    "· 心率 / 腕温 / 光照的小时级统计" + "\n\n" +
+                    "不会上传：" + "\n" +
+                    "逐条打卡记录、备注原文、体征逐点读数、任何身份标识。",
+                color = Color(0xFFC8C8C8),
+                fontSize = 9.sp,
+                lineHeight = 13.sp,
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("需要联网", color = Color.White, fontSize = 13.sp)
-            Spacer(Modifier.height(6.dp))
-            Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                Text(
-                    text = "将上传：\n" +
-                        "· 气压与打卡的统计（天数、极值、次数、标签分布）\n" +
-                        "· 心率 / 腕温 / 光照的小时级统计\n\n" +
-                        "不会上传：\n" +
-                        "逐条打卡记录、备注原文、体征逐点读数、任何身份标识。",
-                    color = Color(0xFFC8C8C8),
-                    fontSize = 9.sp,
-                    lineHeight = 13.sp,
-                )
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
+            Box(
+                modifier = Modifier
+                    .width(64.dp)
+                    .height(30.dp)
+                    .background(Color(0xFF1E1E1E), RoundedCornerShape(15.dp))
+                    .clickable { onCancel() },
+                contentAlignment = Alignment.Center,
             ) {
-                Box(
-                    modifier = Modifier
-                        .width(64.dp)
-                        .height(30.dp)
-                        .background(Color(0xFF1E1E1E), RoundedCornerShape(15.dp))
-                        .clickable { showConsent = false },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("取消", color = Color(0xFFB0B0B0), fontSize = 11.sp)
-                }
-                Box(
-                    modifier = Modifier
-                        .width(64.dp)
-                        .height(30.dp)
-                        .background(Color(0xFF2A4A6F), RoundedCornerShape(15.dp))
-                        .clickable {
-                            showConsent = false
-                            startReport()
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("继续", color = Color(0xFFD8E8FA), fontSize = 11.sp)
-                }
+                Text("取消", color = Color(0xFFB0B0B0), fontSize = 11.sp)
+            }
+            Box(
+                modifier = Modifier
+                    .width(64.dp)
+                    .height(30.dp)
+                    .background(Color(0xFF2A4A6F), RoundedCornerShape(15.dp))
+                    .clickable { onConfirm() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("继续", color = Color(0xFFD8E8FA), fontSize = 11.sp)
             }
         }
     }

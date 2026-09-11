@@ -125,6 +125,12 @@ class WatchSessionService : Service() {
             .setContentText(text)
             .setContentIntent(tapIntent)
             .setOngoing(true)
+            // 必须声明"只提醒一次"：这条通知为了维持 indicator 每 30 秒重建一次，
+            // 若不加这个标志，系统会把它当成应用在反复打扰，进而把**同一个 uid**
+            // 的其它提醒类通知一并静音——实测就是把"转坏提醒"打成了
+            // "Muting recently noisy 0|com.yisiyun.guanfeng|2001"。
+            // 一个持续性的状态通知本来也不该每次更新都响。
+            .setOnlyAlertOnce(true)
             .addExtras(extras)
             .setCategory(CATEGORY_WORKOUT)
             .build()

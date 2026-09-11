@@ -38,7 +38,13 @@ import com.yisiyun.guanfeng.core.WeatherAssessment
  */
 object TrendNotifier {
 
-    private const val CHANNEL_ID = "guanfeng_trend_alert"
+    /**
+     * 渠道 id 带 v2：Android 的渠道重要度**创建后不可修改**，
+     * 而首版用的是 IMPORTANCE_DEFAULT（没有横幅）。要让改动生效必须换 id 重建，
+     * 同时删掉旧渠道，免得用户看到两个同名项。
+     */
+    private const val CHANNEL_ID = "guanfeng_trend_alert_v2"
+    private const val LEGACY_CHANNEL_ID = "guanfeng_trend_alert"
     private const val NOTIFICATION_ID = 2001
 
     /** 两次提醒之间的最短间隔。 */
@@ -49,12 +55,15 @@ object TrendNotifier {
 
     fun ensureChannel(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        manager.deleteNotificationChannel(LEGACY_CHANNEL_ID)
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
                 "天气转坏提醒",
-                NotificationManager.IMPORTANCE_DEFAULT,
+                // HIGH：这是需要用户当时就知道了的信息，应当以横幅弹出。
+                // 声音与震动由系统按用户自己的设置处理，应用不自建震动模式。
+                NotificationManager.IMPORTANCE_HIGH,
             ).apply {
                 description = "气压快速下降、可能转雨时提醒一次"
                 enableVibration(true)
@@ -98,10 +107,22 @@ object TrendNotifier {
     private fun post(context: Context, title: String, text: String): Boolean = runCatching {
         ensureChannel(context)
         val manager = context.getSystemService(NotificationManager::class.java) ?: return false
+        // 点通知应当能打开应用——原先没有 contentIntent，点了没反应。
+        val tapIntent = android.app.PendingIntent.getActivity(
+            context,
+            0,
+            android.content.Intent(context, com.yisiyun.guanfeng.MainActivity::class.java)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                    android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            android.app.PendingIntent.FLAG_IMMUTABLE or
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         val notification = Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_guanfeng)
             .setContentTitle(title)
             .setContentText(text)
+            .setContentIntent(tapIntent)
+            .setAutoCancel(true)
             .setWhen(System.currentTimeMillis())
             .setShowWhen(true)
             .build()
