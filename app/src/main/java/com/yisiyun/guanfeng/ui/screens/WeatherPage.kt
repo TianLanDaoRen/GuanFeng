@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yisiyun.guanfeng.core.CorroborationEngine
@@ -61,12 +62,15 @@ fun WeatherPage(state: RecorderState) {
     }
     val hasConclusion = likelihood != RainLikelihood.UNKNOWN
 
+    // 纵向预算（本页可用高度 222dp = 248 − 14 翻页符 − 12 页边距）：
+    //   顶行 37 + 圆环 122 + 底部信息最坏 47 = 206 ≤ 222 ✓
+    // 底部「最坏 47」= 建议 20 + 间隔 2 + 体感一行 12 + 间隔 2 + 速评 11。
+    // 体感那行必须限死一行，否则三条佐证同时出现时会折成三行，把圆环挤出去。
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -95,15 +99,21 @@ fun WeatherPage(state: RecorderState) {
             }
         }
 
-        TrendGauge(
-            rateHpaPerHour = trend?.rateHpaPerHour ?: 0f,
-            grade = trend?.grade ?: TrendGrade.INSUFFICIENT,
-            likelihood = likelihood,
-            hasTrend = hasConclusion,
-            // 必须给正方形：之前写成「高 104dp + 宽 0.78 屏宽」直接把圆环压成了椭圆。
-            // 122dp 正方形在本页纵向余量内。
-            modifier = Modifier.size(122.dp),
-        )
+        // 圆环在「顶行与底部信息之间」居中对齐，而不是用 SpaceBetween 把空白平均分到两处——
+        // 后者会让圆环整体偏上。主人指出「重心有些偏上」，确然。
+        Box(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentAlignment = Alignment.Center,
+        ) {
+            TrendGauge(
+                rateHpaPerHour = trend?.rateHpaPerHour ?: 0f,
+                grade = trend?.grade ?: TrendGrade.INSUFFICIENT,
+                likelihood = likelihood,
+                hasTrend = hasConclusion,
+                // 必须给正方形：之前写成「高 104dp + 宽 0.78 屏宽」直接把圆环压成了椭圆。
+                modifier = Modifier.size(122.dp),
+            )
+        }
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             // 只在真有结论时才给行动建议（带伞 / 备伞 / 无变化）。
@@ -129,10 +139,16 @@ fun WeatherPage(state: RecorderState) {
                     textAlign = TextAlign.Center,
                 )
             } else if (corroborations.isNotEmpty()) {
+                // 只上屏最高优先级的一条，其余折叠成 +N：
+                // 三条全铺开会在 165dp 宽里折成三行，把圆环挤出页面。
+                val first = corroborations.first()
+                val suffix = if (corroborations.size > 1) " +${corroborations.size - 1}" else ""
                 Text(
-                    text = "体感：" + corroborations.joinToString(" · ") { it.label },
+                    text = "体感：${first.label}$suffix",
                     color = Color(0xFFE8C36A),
                     fontSize = 9.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
                 )
             }
