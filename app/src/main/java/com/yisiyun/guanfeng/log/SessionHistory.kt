@@ -85,19 +85,50 @@ object SessionHistory {
      * 裁剪原始会话文件：**保留最近 [keepFiles] 个**（主人的建议）。
      *
      * 为什么敢按个数删而不是按天数：长期趋势已经由 [HourlyArchive] 承担，
-     * 那里只存小时汇总、约 1 KB/天、永不删除；原始文件只服务"最近 3 小时趋势窗口"，
-     * 30 个文件足够覆盖。两者职责分开，就不会出现"删文件就没历史"的死结。
+     * 那里只存小时汇总、约 1 KB/天、永不删除；原始文件只服务"最近 3 小时趋势窗口"。
+     * 两者职责分开，就不会出现"删文件就没历史"的死结。
      *
-     * 注意：`hourly.csv` 前缀不是 `guanfeng_`，因此天然不受这里影响。
+     * 但**个数不等于时间跨度**：重启频繁时 30 个文件可能不到 3 小时，
+     * 重启后的趋势窗口就会缺一段。所以再加一条硬保护：
+     * [keepSinceMs] 之后的文件**无论多少个都不删**。
+     *
+     * 注意：`hourly.csv` 与 `checkins.csv` 前缀都不是 `guanfeng_`，天然不受影响。
      */
-    fun pruneOldSessions(context: Context, keepFiles: Int = KEPT_SESSION_FILES): Int {
+    fun pruneOldSessions(
+        context: Context,
+        keepFiles: Int = KEPT_SESSION_FILES,
+        keepSinceMs: Long = 0L,
+    ): Int {
         if (keepFiles <= 0) return 0
         val directory = context.getExternalFilesDir(null) ?: context.filesDir
         val files = directory.listFiles { candidate ->
             candidate.isFile && candidate.name.startsWith(FILE_PREFIX) &&
                 candidate.name.endsWith(FILE_SUFFIX)
         }?.sortedByDescending { it.lastModified() } ?: return 0
-        return files.drop(keepFiles).count { runCatching { it.delete() }.getOrDefault(false) }
+        val doomed = selectForDeletion(
+            modifiedTimes = files.map { it.lastModified() },
+            keepFiles = keepFiles,
+            keepSinceMs = keepSinceMs,
+        )
+        return doomed.count { runCatching { files[it].delete() }.getOrDefault(false) }
+    }
+
+    /**
+     * 纯选择逻辑（可单测）：给定按时间**降序**排列的修改时间，返回应删除的下标。
+     * 规则 = 前 keepFiles 个 ∪ 时间晚于 keepSinceMs 的那些。
+     */
+    fun selectForDeletion(
+        modifiedTimes: List<Long>,
+        keepFiles: Int,
+        keepSinceMs: Long,
+    ): List<Int> {
+        val kept = HashSet<Int>()
+        for (index in modifiedTimes.indices) {
+            if (index < keepFiles || (keepSinceMs > 0L && modifiedTimes[index] >= keepSinceMs)) {
+                kept += index
+            }
+        }
+        return modifiedTimes.indices.filter { it !in kept }
     }
 
     /** 从磁盘恢复：按修改时间从新到旧读会话文件，凑满窗口即停。 */

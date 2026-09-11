@@ -112,6 +112,9 @@ object PressureRecorder {
     /** 速评窗口短，绝对量门限必须按比例缩小，否则 5 分钟内永远达不到 0.5 hPa 而恒判「平稳」。 */
     private const val FAST_MIN_ABSOLUTE_DELTA_HPA = 0.15f
 
+    /** 原始文件的时间保护窗：最近这段时间内的会话文件一律不删（个数不等于时间跨度）。 */
+    private const val RETAIN_WINDOW_MS = 6L * 60L * 60L * 1000L
+
     /** 跨会话状态的落盘节奏（不必每条样本都写盘）。 */
     private const val PERSIST_INTERVAL_MS = 5L * 60L * 1000L
 
@@ -208,10 +211,29 @@ object PressureRecorder {
         val newScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         scope = newScope
         newScope.launch {
+            // 【顺序很重要】先做归档迁移，再裁剪原始文件。
+            // 反过来的话，首次运行新版会先把最旧的文件删掉，
+            // 那些数据就永远进不了小时归档——等于静默丢失历史。
+            if (HourlyArchive.loadAll(applicationContext).isEmpty()) {
+                val seeded = HourlyArchive.seed(
+                    applicationContext,
+                    SessionHistory.loadHourlyRollup(
+                        applicationContext,
+                        SessionHistory.ALL_HISTORY_DAYS,
+                        startedAtMs,
+                    ),
+                )
+                if (seeded > 0) Log.i(TAG, "小时归档迁移：从原始文件补齐 $seeded 个小时")
+            }
+
             val restored = runCatching {
-                // 原始会话文件按「保留最近 N 个」裁剪；长期历史由小时归档承担，
-                // 所以这里可以放心删旧文件，不会丢长期趋势。
-                SessionHistory.pruneOldSessions(applicationContext)
+                // 迁移完了再裁剪。原始文件只服务「重启后恢复 3 小时趋势窗口」，
+                // 长期历史已由小时归档承担，所以可以放心删旧文件。
+                // 但个数不等于时间跨度：最近 RETAIN_WINDOW_MS 内的文件一律不删。
+                SessionHistory.pruneOldSessions(
+                    context = applicationContext,
+                    keepSinceMs = startedAtMs - RETAIN_WINDOW_MS,
+                )
                 SessionHistory.loadRecent(applicationContext, startedAtMs, WINDOW_MS, MAX_GAP_MS)
             }.getOrElse { error ->
                 Log.w(TAG, "读取历史样本失败: $error")
@@ -233,19 +255,6 @@ object PressureRecorder {
             seededLight.forEach { (timestamp, lux) -> lightHistory.addLast(timestamp to lux) }
             seededLight.lastOrNull()?.let { lightLux = it.second }
             Log.i(TAG, "回填光照读数 ${seededLight.size} 个")
-
-            // 一次性迁移：小时归档为空时，用已有原始文件把历史补齐（旧文件只有气压）
-            if (HourlyArchive.loadAll(applicationContext).isEmpty()) {
-                val seeded = HourlyArchive.seed(
-                    applicationContext,
-                    SessionHistory.loadHourlyRollup(
-                        applicationContext,
-                        SessionHistory.ALL_HISTORY_DAYS,
-                        startedAtMs,
-                    ),
-                )
-                if (seeded > 0) Log.i(TAG, "小时归档迁移：从原始文件补齐 $seeded 个小时")
-            }
 
             registerSensors(manager)
 
