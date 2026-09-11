@@ -28,9 +28,17 @@ data class RecorderState(
     val recording: Boolean = false,
     val pressureHpa: Float? = null,
     val trend: TrendResult? = null,
+    /** 传感器此刻的瞬时心率（`TYPE_HEART_RATE` 直接给的值，不是静息心率）。 */
     val heartRateBpm: Float? = null,
+    /**
+     * 静息基线：只采「没有垂直运动、没有步数」的静止样本，取其低分位数。
+     * 这才是「静息心率」该有的来历——瞬时值直接当静息心率是错的。
+     */
+    val restingHeartRateBpm: Float? = null,
     val wristTemperatureC: Float? = null,
     val lightLux: Float? = null,
+    /** 环境光在 10 分钟尺度上的变化（lux）。用于将来分析它与天气的关系，现在只记录。 */
+    val lightDelta10Min: Float? = null,
     val loggedRows: Int = 0,
     val elapsedSeconds: Long = 0,
     val logFileName: String = "",
@@ -56,6 +64,16 @@ object PressureRecorder {
     private const val DEMO_WINDOW_MS = 6 * 60 * 1000L
     private const val DEMO_MIN_SAMPLES = 5
     private const val MAX_SAMPLES = 400
+    private const val LIGHT_TREND_WINDOW_MS = 10 * 60 * 1000L
+    private const val LIGHT_TREND_MIN_SPAN_MS = 5 * 60 * 1000L
+
+    /** 取低分位数：静息心率本质上是"心率分布的下沿"，不是平均值。 */
+    private fun percentile(values: List<Float>, fraction: Float): Float {
+        if (values.isEmpty()) return 0f
+        val sorted = values.sorted()
+        val index = ((sorted.size - 1) * fraction).toInt().coerceIn(0, sorted.size - 1)
+        return sorted[index]
+    }
 
     /** 腕温是厂商自定义传感器，其 16 个通道的语义没有公开文档，这里取首通道并如实标注未标定。 */
     private const val TYPE_WRIST_TEMPERATURE = 69815
@@ -86,6 +104,14 @@ object PressureRecorder {
     private var lightLux: Float? = null
     private val gravity = FloatArray(3)
 
+    // 静息候选：只在没有垂直运动、没有步数的静止样本上采心率
+    private val restingCandidates = ArrayList<Float>()
+    private var restingBaseline: Float? = null
+
+    // 环境光慢趋势（10 分钟尺度），目前只记录不改判定——没有真实降水标注前不下结论
+    private val lightHistory = ArrayDeque<Pair<Long, Float>>()
+    private var lightDelta10Min: Float? = null
+
     @Synchronized
     fun start(context: Context) {
         if (started) {
@@ -104,6 +130,10 @@ object PressureRecorder {
         heartRate = null
         wristTemperature = null
         lightLux = null
+        restingCandidates.clear()
+        restingBaseline = null
+        lightHistory.clear()
+        lightDelta10Min = null
         startedAtMs = System.currentTimeMillis()
 
         registerSensors(manager)
@@ -228,21 +258,55 @@ object PressureRecorder {
             }
 
             val trend = engine.compute(samples)
+
+            // 静息基线：只用静止样本（无垂直运动、无步数、心率有效），取低分位数。
+            val currentHeartRate = heartRate
+            if (currentHeartRate != null && currentHeartRate > 20f &&
+                accelForSample < 0.35f && stepsForSample == 0
+            ) {
+                restingCandidates += currentHeartRate
+                if (restingCandidates.size > 900) {
+                    restingCandidates.removeAt(0)
+                }
+                restingBaseline = percentile(restingCandidates, 0.1f)
+            }
+
+            // 环境光 10 分钟慢趋势：将来用于考察"光照下降 + 气压下降"是否同时出现，
+            // 但在有真实降水标注之前，它只记录、不参与任何判定。
+            lightLux?.let { lux ->
+                lightHistory.addLast(timestamp to lux)
+                while (lightHistory.isNotEmpty() &&
+                    timestamp - lightHistory.first().first > LIGHT_TREND_WINDOW_MS
+                ) {
+                    lightHistory.removeFirst()
+                }
+                val oldest = lightHistory.firstOrNull()
+                lightDelta10Min = if (oldest != null && timestamp - oldest.first >= LIGHT_TREND_MIN_SPAN_MS) {
+                    lux - oldest.second
+                } else {
+                    null
+                }
+            }
+
             val written = logger?.append(
                 timestampMs = timestamp,
                 pressureHpa = pressure,
                 verticalAccel = accelForSample,
                 stepsInWindow = stepsForSample,
                 trend = trend,
+                restingHeartRateBpm = restingBaseline,
+                lightDelta10Min = lightDelta10Min,
             ) ?: false
 
             _state.value = _state.value.copy(
                 recording = true,
                 pressureHpa = pressure,
                 trend = trend,
-                heartRateBpm = heartRate,
+                heartRateBpm = currentHeartRate,
+                restingHeartRateBpm = restingBaseline,
                 wristTemperatureC = wristTemperature,
                 lightLux = lightLux,
+                lightDelta10Min = lightDelta10Min,
                 loggedRows = logger?.rowCount ?: 0,
                 elapsedSeconds = (timestamp - startedAtMs) / 1000,
                 logFileName = logger?.displayName ?: "",

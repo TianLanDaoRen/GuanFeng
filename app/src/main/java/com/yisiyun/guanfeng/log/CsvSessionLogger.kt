@@ -46,7 +46,9 @@ class CsvSessionLogger(context: Context) {
         pressureHpa: Float,
         verticalAccel: Float,
         stepsInWindow: Int,
-        trend: TrendResult?
+        trend: TrendResult?,
+        restingHeartRateBpm: Float? = null,
+        lightDelta10Min: Float? = null,
     ): Boolean = runCatching {
         val clock = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(timestampMs))
         val line = buildString {
@@ -64,7 +66,9 @@ class CsvSessionLogger(context: Context) {
             append("%.3f".format(trend?.fitRSquared ?: 0f)).append(',')
             append("%.2f".format(trend?.windowMinutes ?: 0f)).append(',')
             append("%.0f".format((trend?.coverageFraction ?: 0f) * 100f)).append(',')
-            append(trend?.confidence?.label ?: "数据不足")
+            append(trend?.confidence?.label ?: "数据不足").append(',')
+            append(restingHeartRateBpm?.let { "%.0f".format(it) } ?: "").append(',')
+            append(lightDelta10Min?.let { "%.0f".format(it) } ?: "")
         }
         file.appendText(line + "\n")
         rowCount++
@@ -75,6 +79,7 @@ class CsvSessionLogger(context: Context) {
         const val HEADER =
             "timestamp_ms,clock,pressure_hpa,vertical_accel,steps,rate_hpa_per_hour," +
                 "delta_hpa_3h,grade,weather_samples,elevation_events,elevation_meters," +
-                "r_squared,window_minutes,coverage_pct,confidence"
+                "r_squared,window_minutes,coverage_pct,confidence," +
+                "resting_heart_rate_bpm,light_delta_10min"
     }
 }

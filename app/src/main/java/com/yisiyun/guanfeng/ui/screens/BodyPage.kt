@@ -13,26 +13,39 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yisiyun.guanfeng.data.RecorderState
 
-/** 第二屏 · 体感：环境侧与身体侧并置，这是只有贴着皮肤的设备才拿得到的数据。 */
+/**
+ * 第二屏 · 体感：环境侧与身体侧并置。
+ *
+ * 关于心率的命名必须严格：
+ *   - **实时心率**是传感器此刻的读数（`TYPE_HEART_RATE` 直接给的值）；
+ *   - **静息基线**才是派生指标——只采「无垂直运动、无步数」的静止样本，取其低分位数。
+ * 早先把瞬时值标成「静息心率」是错的：爬楼时读数 120，界面照样写「静息心率」。
+ */
 @Composable
 fun BodyPage(state: RecorderState) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.SpaceEvenly,
+        // 用固定间距而不是 SpaceEvenly：后者会把每行的注释顶出可視区（本屏只有 189×248dp）
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         BigReading(
-            label = "静息心率",
+            label = "实时心率",
             value = state.heartRateBpm?.let { "%.0f".format(it) } ?: "—",
             unit = "bpm",
             color = Color(0xFFFF8A8A),
-            note = if (state.heartRateBpm == null || state.heartRateBpm == 0f) "未佩戴时读数为 0" else null,
+            note = when {
+                state.heartRateBpm == null -> "未取到读数"
+                state.heartRateBpm == 0f -> "未佩戴时读数为 0"
+                state.restingHeartRateBpm != null ->
+                    "静息基线 %.0f bpm（静止样本低分位）".format(state.restingHeartRateBpm)
+                else -> "静息基线攒样本中"
+            },
         )
         BigReading(
             label = "腕温",
@@ -46,7 +59,9 @@ fun BodyPage(state: RecorderState) {
             value = state.lightLux?.let { "%.0f".format(it) } ?: "—",
             unit = "lux",
             color = Color(0xFF9BB0FF),
-            note = null,
+            note = state.lightDelta10Min?.let {
+                "10 分钟变化 %+.0f lux（仅记录，未参与判定）".format(it)
+            } ?: "光照慢趋势攒样本中",
         )
     }
 }
@@ -65,15 +80,10 @@ private fun BigReading(
             Text(text = value, color = color, fontSize = 28.sp)
             Spacer(Modifier.fillMaxWidth(0.03f))
             Text(text = unit, color = Color(0xFF8A8A8A), fontSize = 10.sp)
-            Spacer(Modifier.height(0.dp))
         }
         if (note != null) {
-            Text(
-                text = note,
-                color = Color(0xFF5E5E5E),
-                fontSize = 7.sp,
-                textAlign = TextAlign.Start,
-            )
+            Text(text = note, color = Color(0xFF5E5E5E), fontSize = 7.sp)
         }
+        Spacer(Modifier.height(0.dp))
     }
 }
