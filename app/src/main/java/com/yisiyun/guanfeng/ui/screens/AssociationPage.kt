@@ -246,38 +246,43 @@ fun AssociationPage(state: RecorderState) {
                     lineHeight = 11.sp,
                 )
             } else {
-                PressureCheckInChart(
-                    hourly = current.hourly,
-                    checkIns = checkIns,
-                    nowMs = System.currentTimeMillis(),
-                    modifier = Modifier.fillMaxWidth().height(96.dp),
-                )
-                Text(
-                    text = "打卡 ${current.checkInCount} 次 · 气压大变化日 ${current.bigSwingDays} 天",
-                    color = Color(0xFFD0D0D0),
-                    fontSize = 9.sp,
-                )
-                Text(
-                    text = "青线＝气压（已去高度） · 黄点＝打卡",
-                    color = Color(0xFF5E6A72),
-                    fontSize = 7.sp,
-                )
-                val overlap = current.overlapRatio
-                Text(
-                    text = if (overlap == null) {
-                        "还没有打卡记录"
-                    } else {
-                        "落在变化日的打卡 ${current.checkInsOnBigSwingDays} 次（%.0f%%）".format(overlap * 100)
-                    },
-                    color = Color(0xFFE8C36A),
-                    fontSize = 9.sp,
-                )
-                Text(
-                    text = "有效天 ${current.daysWithData} 天 · 样本量小，仅作观察，不作结论",
-                    color = Color(0xFF5E5E5E),
-                    fontSize = 7.sp,
-                    lineHeight = 10.sp,
-                )
+                // 中间这截**可滚动**，底部的「生成 AI 报告」固定在页面下方。
+                //
+                // 原因：这一页的内容会随数据变多（图表 + 三行统计 + 图例 + 提示），
+                // 而 189×248dp 的可用高度是固定的。我上一次加大图表时没算预算，
+                // 总高约 228dp > 可用 222dp，**按钮直接被挤出屏幕**。
+                // 把"重要操作"钉在底部、让可变内容自己滚，这类问题才不会复发。
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    PressureCheckInChart(
+                        hourly = current.hourly,
+                        checkIns = checkIns,
+                        nowMs = System.currentTimeMillis(),
+                        modifier = Modifier.fillMaxWidth().height(88.dp),
+                    )
+                    Text(
+                        text = "打卡 ${current.checkInCount} 次 · 大变化日 ${current.bigSwingDays} 天" +
+                            " · 落在其上的打卡 ${current.checkInsOnBigSwingDays} 次",
+                        color = Color(0xFFD0D0D0),
+                        fontSize = 9.sp,
+                    )
+                    Text(
+                        text = "青线＝气压（已去高度） · 黄点＝打卡",
+                        color = Color(0xFF5E6A72),
+                        fontSize = 7.sp,
+                    )
+                    Text(
+                        text = "有效天 ${current.daysWithData} 天 · 样本量小，仅作观察，不作结论",
+                        color = Color(0xFF5E5E5E),
+                        fontSize = 7.sp,
+                        lineHeight = 10.sp,
+                    )
+                }
 
                 Spacer(Modifier.height(2.dp))
                 if (readyForReport) {
