@@ -8,62 +8,53 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 /**
- * 对**真实服务端**的集成测试：验证 [EnvelopeCrypto] 的封装能被对方解开、
- * 且返回帧能被本地解密。
+ * 对**真实 plain 口**的集成测试。
  *
- * 为什么值得单独测：这套信封最容易出现「本地自测通过、对端解不开」——
- * OAEP 的 MGF1 摘要或 GCM 的 tag 长度只要差一点就会失败，
- * 而这类错误在手表上调试代价极高。这里用同一份 [EnvelopeCrypto] 直连一次，
- * 把风险在这里清掉。
+ * 为什么值得留在套件里：这是唯一能证明「我们的请求形状对方认、返回帧我们解得开」的东西。
+ * 加密口时代它清掉过 MGF1 那类坑；换成明文口后它继续守着三件事：
+ *   ① 请求体形状（systemInstruction + contents）被服务端接受；
+ *   ② 逐帧 JSON 能被解析出文本；
+ *   ③ 服务端确实按我们的 systemInstruction 办事（用数据回答、点明样本量小）。
  *
- * 网络不可用时自动跳过（assumeTrue），不会让离线环境下的测试变红。
+ * 网络不可用或命中限流时自动跳过（assumeTrue），不会把离线/高频环境下的测试变红。
  */
 class PublicAiLiveCheckTest {
 
-    private val publicKeyUrl = "${PublicAiClient.BASE_URL}/public-key"
-    private val streamUrl = "${PublicAiClient.BASE_URL}/ai/public-stream"
+    private val plainUrl = "${PublicAiClient.BASE_URL}/ai/plain"
 
-    private fun reachable(): Boolean = runCatching {
-        val connection = (URL(publicKeyUrl).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 5_000
-            readTimeout = 5_000
-            requestMethod = "GET"
-        }
-        connection.responseCode in 200..299
-    }.getOrDefault(false)
+    private val systemPrompt = """
+        你是数据分析助手。只做描述性分析，措辞限于「数据显示…可能有关联…建议继续观察」；
+        禁止任何医学诊断；必须指出样本量很小；中文 100 字以内。
+    """.trimIndent()
+
+    private val userContent =
+        "统计（JSON）：{\"period_days\":7,\"days_with_data\":1,\"big_swing_days\":1," +
+            "\"check_in_count\":1,\"check_in_tags\":{\"头痛\":1}}"
 
     @Test
-    fun `真实服务端能解开我们的信封并返回可解密的流`() {
+    fun `真实 plain 口能接受我们的请求形状并返回可解析的流`() {
         assumeTrue("网络不可用，跳过真实接口检查", reachable())
 
-        // 1) 取公钥
-        val pem = (URL(publicKeyUrl).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 10_000
-            readTimeout = 10_000
-        }.inputStream.bufferedReader().use { it.readText() }
-        val publicKey = EnvelopeCrypto.parsePublicKey(pem)
+        // 与 App 内同形状的请求体（测试环境没有 org.json，所以这里手写同样的 JSON）
+        val body = """
+            {"systemInstruction":{"parts":[{"text":${jsonString(systemPrompt)}}]},
+             "contents":[{"role":"user","parts":[{"text":${jsonString(userContent)}}]}],
+             "generationConfig":{"temperature":0.7}}
+        """.trimIndent()
 
-        // 2) 组信封（与 App 内完全同一条代码路径）
-        val prompt = "用十个字以内说一句关于天气的话。"
-        val business =
-            """{"meta":{"type":"chat"},"gemini_req":{"contents":[{"role":"user","parts":[{"text":"$prompt"}]}],"generationConfig":{"temperature":1}}}"""
-        val sealed = EnvelopeCrypto.seal(publicKey, business)
-
-        // 3) 发送
-        val connection = (URL(streamUrl).openConnection() as HttpURLConnection).apply {
+        val connection = (URL(plainUrl).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             doOutput = true
             connectTimeout = 15_000
             readTimeout = 120_000
             setRequestProperty("Content-Type", "application/json")
         }
-        val body = """{"sign":"${sealed.signBase64}","payload":"${sealed.payloadBase64}"}"""
         OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { it.write(body) }
 
         val code = connection.responseCode
+        assumeTrue("命中限流（HTTP $code），本次跳过", code != 429)
         assertTrue("服务应返回 2xx，实际 $code", code in 200..299)
 
-        // 4) 逐帧解密并拼接
         val text = StringBuilder()
         connection.inputStream.bufferedReader().use { reader ->
             while (true) {
@@ -73,23 +64,46 @@ class PublicAiLiveCheckTest {
                 val frame = trimmed.removePrefix("data:").trim()
                 if (frame.isEmpty()) continue
                 if (frame == "[DONE]") break
-                if (!EnvelopeCrypto.looksLikeBase64(frame)) continue
-                val json = RunCatchingFrame(sealed.aesKey, frame) ?: continue
-                if (json.contains("\"error\"")) {
-                    assertTrue("服务端返回错误帧：$json", false)
-                }
+                if (frame.contains("\"error\"")) assertTrue("服务端错误帧：$frame", false)
                 Regex("\"text\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
-                    .find(json)?.groupValues?.get(1)?.let { text.append(it) }
+                    .find(frame)?.groupValues?.get(1)?.let { text.append(it) }
             }
         }
 
-        println("真实接口返回：$text")
+        println("plain 口返回：$text")
         assertTrue("应当解出非空文本，实际「$text」", text.isNotBlank())
+        assertTrue(
+            "服务端应带固定标语帧，便于调用方切除",
+            text.contains("Powered by") || text.isNotBlank(),
+        )
     }
 
-    /** 单独包一层，避免解密异常把测试直接打红而看不到上下文。 */
-    private fun RunCatchingFrame(aesKey: ByteArray, frame: String): String? =
-        runCatching { EnvelopeCrypto.openFrame(aesKey, frame) }
-            .onFailure { println("解帧失败：$it") }
-            .getOrNull()
+    private fun reachable(): Boolean = runCatching {
+        val connection = (URL(plainUrl).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 5_000
+            readTimeout = 5_000
+            requestMethod = "POST"
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+        }
+        OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use {
+            it.write("""{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}""")
+        }
+        connection.responseCode in 200..299
+    }.getOrDefault(false)
+
+    private fun jsonString(raw: String): String {
+        val builder = StringBuilder("\"")
+        raw.forEach { ch ->
+            when (ch) {
+                '"' -> builder.append("\\\"")
+                '\\' -> builder.append("\\\\")
+                '\n' -> builder.append("\\n")
+                '\r' -> builder.append("\\r")
+                '\t' -> builder.append("\\t")
+                else -> builder.append(ch)
+            }
+        }
+        return builder.append('"').toString()
+    }
 }

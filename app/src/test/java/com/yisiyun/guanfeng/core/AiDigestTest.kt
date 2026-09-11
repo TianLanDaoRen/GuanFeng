@@ -70,14 +70,23 @@ class AiDigestTest {
     }
 
     @Test
-    fun `提示词必须带上三条硬约束`() {
-        val prompt = AiDigest.buildPrompt("{}", 7)
+    fun `系统指令必须带上四条约束`() {
+        val prompt = AiDigest.buildSystemInstruction(7)
 
         assertTrue("禁止医学结论", prompt.contains("禁止任何医学诊断"))
         assertTrue("必须点明样本量小", prompt.contains("样本量很小"))
-        assertTrue("限定篇幅", prompt.contains("200 字以内"))
-        assertTrue("带上了统计", prompt.contains("{}"))
+        assertTrue("限定篇幅", prompt.contains("150 字以内"))
+        assertTrue("禁止表格与代码块（腕上放不下）", prompt.contains("不要使用表格、代码块"))
+        assertTrue("带上观察周期", prompt.contains("最近 7 天"))
         assertEquals(prompt, prompt.trim())
+    }
+
+    @Test
+    fun `用户内容只带聚合统计`() {
+        val content = AiDigest.buildUserContent("""{"check_in_count":1}""")
+
+        assertTrue(content.contains("统计（JSON）"))
+        assertTrue(content.contains("\"check_in_count\":1"))
     }
 
     @Test

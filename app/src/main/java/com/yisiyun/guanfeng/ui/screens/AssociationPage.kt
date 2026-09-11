@@ -46,6 +46,7 @@ import com.yisiyun.guanfeng.data.CheckInSignal
 import com.yisiyun.guanfeng.data.RecorderState
 import com.yisiyun.guanfeng.log.CheckInHistory
 import com.yisiyun.guanfeng.log.SessionHistory
+import com.yisiyun.guanfeng.ui.components.MarkdownText
 import java.util.TimeZone
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -136,6 +137,7 @@ fun AssociationPage(state: RecorderState) {
     var reportOpen by remember { mutableStateOf(false) }
     var generating by remember { mutableStateOf(false) }
     var reportError by remember { mutableStateOf<String?>(null) }
+    var reportNotice by remember { mutableStateOf<String?>(null) }
     val reportFlow = remember { MutableStateFlow("") }
     val reportText by reportFlow.collectAsState()
 
@@ -148,15 +150,20 @@ fun AssociationPage(state: RecorderState) {
         val snapshot = current ?: return
         reportFlow.value = ""
         reportError = null
+        reportNotice = null
         generating = true
         reportOpen = true
-        val prompt = AiDigest.buildPrompt(
-            digestJson = AiDigest.build(snapshot, checkIns, zoneOffsetMs),
-            periodDays = PERIOD_DAYS,
-        )
         scope.launch {
-            val result = PublicAiClient.stream(prompt) { delta -> reportFlow.value += delta }
+            val result = PublicAiClient.stream(
+                systemPrompt = AiDigest.buildSystemInstruction(PERIOD_DAYS),
+                userContent = AiDigest.buildUserContent(
+                    AiDigest.build(snapshot, checkIns, zoneOffsetMs)
+                ),
+                onDelta = { delta -> reportFlow.value += delta },
+                onNotice = { notice -> reportNotice = notice },
+            )
             generating = false
+            reportNotice = null
             result.onFailure { reportError = it.message ?: "请求失败" }
         }
     }
@@ -250,6 +257,7 @@ fun AssociationPage(state: RecorderState) {
             ReportOverlay(
                 text = reportText,
                 generating = generating,
+                notice = reportNotice,
                 error = reportError,
                 onClose = { reportOpen = false },
                 onRetry = { startReport() },
@@ -284,11 +292,12 @@ fun AssociationPage(state: RecorderState) {
     }
 }
 
-/** 报告浮层：整页覆盖，可滚动，流式追加文本。 */
+/** 报告浮层：整页覆盖，可滚动，流式追加文本并按极简 Markdown 渲染。 */
 @Composable
 private fun ReportOverlay(
     text: String,
     generating: Boolean,
+    notice: String?,
     error: String?,
     onClose: () -> Unit,
     onRetry: () -> Unit,
@@ -315,16 +324,23 @@ private fun ReportOverlay(
         }
         Spacer(Modifier.height(4.dp))
         Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            Text(
-                text = when {
-                    error != null -> "生成失败：$error"
-                    text.isEmpty() && generating -> "正在分析…（公共接口无 SLA，高峰可能排队）"
-                    else -> text
-                },
-                color = if (error != null) Color(0xFFFF8A8A) else Color(0xFFE0E0E0),
-                fontSize = 9.sp,
-                lineHeight = 13.sp,
-            )
+            when {
+                error != null -> Text(
+                    text = "生成失败：$error",
+                    color = Color(0xFFFF8A8A),
+                    fontSize = 9.sp,
+                    lineHeight = 13.sp,
+                )
+
+                text.isEmpty() && generating -> Text(
+                    text = notice ?: "正在分析…（公共接口无 SLA，高峰可能排队）",
+                    color = if (notice != null) Color(0xFFE8C36A) else Color(0xFF8A8A8A),
+                    fontSize = 9.sp,
+                    lineHeight = 13.sp,
+                )
+
+                else -> MarkdownText(raw = text)
+            }
         }
         if (error != null) {
             Spacer(Modifier.height(4.dp))

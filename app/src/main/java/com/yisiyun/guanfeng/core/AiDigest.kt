@@ -55,22 +55,26 @@ object AiDigest {
     }
 
     /**
-     * 提示词。三条硬约束缺一不可——尤其是第 1 条：
-     * 一周 7 天、几次打卡在统计上不足以支撑任何医学结论，模型必须被明确禁止越界。
+     * 系统指令：三条硬约束 + 输出形态。
+     *
+     * 第 1 条最重要——一周 7 天、几次打卡在统计上不足以支撑任何医学结论，
+     * 模型必须被明确禁止越界；第 4 条是给手表屏幕的：表格与代码块在 189dp 宽上
+     * 根本没法看，直接从源头禁掉，省得再去做渲染。
      */
-    fun buildPrompt(digestJson: String, periodDays: Int): String = """
-        你是数据分析助手。下面是一位用户最近 $periodDays 天的「气压」与「自报不适」的聚合统计。
-        这些数据不含任何逐条原始记录，也没有身份信息。
+    fun buildSystemInstruction(periodDays: Int): String = """
+        你是数据分析助手。用户会给你最近 $periodDays 天的「气压」与「自报不适」的聚合统计，
+        不含任何逐条原始记录，也没有身份信息。
 
-        请严格遵守以下约束：
+        严格遵守：
         1. 只做描述性分析，措辞限于「数据显示…可能有关联…建议继续观察」；
            禁止任何医学诊断、病因推断、用药或治疗建议。
         2. 必须明确指出样本量很小、结论不可靠，不要用百分比或术语制造确定性。
-        3. 中文，200 字以内，分三段：数据概况 / 可能存在的关联 / 一条可执行的观察建议。
-
-        统计（JSON）：
-        $digestJson
+        3. 中文，150 字以内，分三段：数据概况 / 可能存在的关联 / 一条可执行的观察建议。
+        4. 不要使用表格、代码块或长列表——阅读终端是一块很小的手表屏幕。
     """.trimIndent()
+
+    /** 用户内容：只带聚合统计。 */
+    fun buildUserContent(digestJson: String): String = "统计（JSON）：\n$digestJson"
 
     private data class DailyPressure(val label: String, val minHpa: Float, val maxHpa: Float)
 
