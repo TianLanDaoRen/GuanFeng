@@ -1,0 +1,277 @@
+# 观风 · GuanFeng
+
+> 手表上的离线微气象仪表 —— 为 OPPO Watch 4 Pro（OWW221）而做
+
+观风把手腕上的气压计、心率与腕温，变成一台**不依赖网络的短临气象仪表**：
+在手机摔坏、手表也没网的处境下，抬腕就能知道未来 6–12 小时会不会变天，
+以及此刻外界环境与自身状态是怎么对应的。
+
+整个项目的赌注只有一句话：**这台机器有气压计，而气压计不需要网络，就能算出天气走向。**
+
+---
+
+## 一、为什么做这个
+
+1. **离线是唯一稳的路径。** 手表的蓝牙共享网络只有 80–120 KB（官方口径），
+   强网络型应用在这条管子上会失效。而气压短临预报把"预报"这件事从云端搬到了本地。
+2. **系统自带天气恰好是要被替代的那个。** 设备上已装 `com.heytap.wearable.weather`，
+   但它依赖手机与网络——正好是"手机坏了"时最先失效的一环。
+3. **架构上主动避开三条死线。**
+   - 官方明确"不支持应用在后台运行" → 不做常驻任务，改用前台短采样 + 每行即时落盘；
+   - indicator 只支持导航 / 运动 / 媒体播放三类 category，**天气类没有合法 category**
+     → 硬接接不上，索性从架构上不设计常驻任务；
+   - 网络权限属敏感权限、用户同意前不得联网 → 本应用**一个网络权限都不申请**。
+
+---
+
+## 二、目标设备与实测底盘
+
+| 项 | 实测值（OWW221 / Android 11 / API 30 / build OWW221_11_A.281） |
+|---|---|
+| 屏幕 | 378 × 496 px · density 2.0（320 dpi）· **189 × 248 dp** |
+| 形态 | `isScreenRound = false`（方屏）· 圆角 64 px = **32 dp** · 四角额外内缩 **9.3 dp** |
+| 传感器 | 设备报告 42 个；气压 / 环境光 / 9 轴 / 抬腕手势**零权限可用** |
+| 心率 | `TYPE_HEART_RATE`，需 `BODY_SENSORS` 运行时授权，回调约 1 Hz |
+| 腕温 | `com.google.wear.sensor.w_temperature`(69815) 实测出真数据（33–34 ℃） |
+| 输入法 | `com.sogou.ime.wear`（搜狗手表版），第三方应用可无缝调用 |
+| 后台 | 退后台并熄屏后进程存活 ≥5 分钟、采样不中断（"不保证"而非"立刻杀"） |
+
+> 完整的传感器清单、权限矩阵、取证命令与踩坑记录，见 skill
+> `oppo-watch/references/oww221-probe-findings.md`。
+
+---
+
+## 三、模块与数据流
+
+```
+气压 / 重力 / 线性加速度 / 步数
+        │  每 2 秒取一个样本
+        ▼
+   PressureSample ──► PressureTrendEngine ──► TrendResult ──┬─► WeatherRule ─► UI
+                     （高度解耦 + 置信闸门）                └─► CsvSessionLogger
+```
+
+```
+app/src/main/java/com/yisiyun/guanfeng/
+├── MainActivity.kt              宿主：BODY_SENSORS 授权 + 屏幕常亮
+├── core/                        算法内核（纯 Kotlin，零 Android 依赖 → 可 JVM 单测）
+│   ├── PressureTrend.kt         高度解耦状态机 + 回归 + 三级置信闸门
+│   └── WeatherRule.kt           启发式风雨规则（置信度非 OK 时拒绝给结论）
+├── log/
+│   └── CsvSessionLogger.kt      会话落盘（每行即时追加）
+├── ui/
+│   └── GuanFengScreen.kt        真机验证界面
+└── probe/
+    └── ProbeScreen.kt           MVP-1 探针页，保留作诊断工具
+tools/
+└── analyze_guanfeng_log.py      离线复盘工具（只用标准库）
+```
+
+**设计约束：`core/` 不允许出现任何 Android import。** 算法必须能在开发机上被单测证死，
+而不是靠真机反复试。
+
+---
+
+## 四、算法：把「天气」和「高度」拆开
+
+### 4.1 核心命题
+
+气压计读到的是**「天气 + 高度」的叠加信号**。而爬一层楼就有约 0.36 hPa——
+**这已经和一整天天气变化的量级相当**。绝大多数气压天气小工具的死穴，
+就是把爬楼误读成天气剧变。
+
+### 4.2 物理底数（决定了阈值怎么取）
+
+| 变化来源 | 速率 |
+|---|---|
+| 最慢爬坡（0.05 m/s） | 0.36 hPa/min |
+| 正常爬楼（0.25 m/s） | 1.80 hPa/min |
+| 电梯（0.50 m/s） | 3.60 hPa/min |
+| 缓慢天气变化（3 hPa/3h） | 0.017 hPa/min |
+| 极端天气上限（10 hPa/3h） | 0.056 hPa/min |
+
+换算基准：海平面附近约 **−0.12 hPa/m**。
+
+两者相差 1–2 个数量级，因此判定阈值取 **0.1 hPa/min**：
+比极端天气上限高 1.8 倍、比最慢爬楼低 7.2 倍。余量偏窄的那一侧，
+由"**必须同时存在垂直运动证据**"这条与条件兜住——台风逼来时人通常不在爬楼。
+
+### 4.3 三道闸门（每一道都是被真机数据逼出来的）
+
+**闸门一 · 30 秒速率基线。**
+真机静置实测：相邻 2 秒的气压抖动可达 0.02 hPa，折算 **0.6 hPa/min**，
+是判定阈值的 6 倍——噪声自己就能伪造出"高度事件"。而同一份数据在 30 秒尺度上
+最大变化是 **0.0000 hPa**。所以速率一律基于 ≥30 秒的基线计算。
+
+**闸门二 · 垂直位移状态机。**
+真实电梯的匀速段加速度接近 0、也没有步数，但气压仍以数 hPa/min 持续变化。
+只认瞬时证据会把它误判成天气剧变。因此改为：由一次瞬时垂直证据**点火**，
+此后只要速率仍超阈值就持续计入高度事件，直到速率回落才退出。
+
+**闸门三 · 绝对量门限。**
+静置 2–6 分钟的窗口内气压总跨度只有 0.04–0.05 hPa，却能被回归算出
+`−0.556 hPa/h` 且 **R² = 0.52**——速率判据与拟合优度都拦不住它，因为那确实是一条
+很干净的微小直线。因此再加绝对量门限：窗口内实测变压低于 **0.5 hPa** 时，
+一律按"平稳"处理，不谈方向。
+
+### 4.4 高度换算
+
+累计高度偏移 ÷ 0.12 hPa/m 即得米数，符号取反（降压即上升）。
+副产品：`elevationMeters` 同时就是**今日累计爬升**。
+
+### 4.5 已知取舍（诚实记录）
+
+爬楼期间若天气同时在变，那一小段天气变化会被一并计入高度偏移。
+量级可接受——爬楼持续数分钟，天气变化约 0.02 hPa/min，5 分钟也只误吸 0.1 hPa。
+
+### 4.6 风雨规则目前**未校准**
+
+`WeatherRule` 是"气压趋势 ↔ 降水"定性关系的**启发式映射**，
+没有用任何真实降水观测数据校准过，因此返回结果里 `calibrated` 恒为 `false`。
+将来若要用真实数据校准，只需替换这一个文件，内核不必改动。
+
+---
+
+## 五、置信度闸门
+
+只有 `TrendConfidence.OK` 时才允许对外给风雨结论；否则一律"未知"：
+
+| 值 | 触发条件 |
+|---|---|
+| `SHORT_WINDOW` | 窗口覆盖率 < 30% |
+| `NOISY` | 有方向性变化时，拟合优度 R² < 0.4 |
+| `INSUFFICIENT` | 样本数不足 |
+| `OK` | 以上皆非 |
+
+**为什么闸门设在引擎层而不是 UI 层**：实测日志里出现过「窗口 0.14 分钟、R² 0.029，
+却报出缓升 1.382 hPa/h」以及「窗口总跨度 0.02 hPa、却报缓降 −0.556 hPa/h 且标为可信」
+——让 UI 去判读已经太晚，错在源头就得在源头拦。
+
+> ⚠️ **注意**：演示窗口只有 6 分钟，短窗口下噪声仍有可能凑出像样的读数。
+> 正式版本采用 3 小时窗口，届时同样的噪声只能折算出约 0.013 hPa/h，不会有这个问题。
+> **测试时应以 `elevation_events` / `elevation_meters` / `steps` 为主证据**
+> （逐样本累加，与回归窗口无关），`grade` 与风雨倾向仅供参考。
+
+---
+
+## 六、数据落盘与离线复盘
+
+### 落盘
+
+`CsvSessionLogger` 每次应用启动生成一个独立文件：
+
+```
+/sdcard/Android/data/com.yisiyun.guanfeng/files/guanfeng_<yyyyMMdd_HHmmss>.csv
+```
+
+- 用 `getExternalFilesDir(null)` → **可直接 `adb pull`，不需要 `run-as`**，不受分区存储限制
+- **每行即时追加**，不是退出时才写 → 进程被杀也只出现"断档"而不丢数据
+- 断档可由时间戳列直接识别（相邻样本间隔 > 3× 采样周期）
+
+列：`timestamp_ms, clock, pressure_hpa, vertical_accel, steps, rate_hpa_per_hour,
+delta_hpa_3h, grade, weather_samples, elevation_events, elevation_meters,
+r_squared, window_minutes, coverage_pct, confidence`
+
+### 离线复盘
+
+```bash
+adb pull /sdcard/Android/data/com.yisiyun.guanfeng/files/ ./guanfeng-logs/
+python3 tools/analyze_guanfeng_log.py guanfeng-logs/
+```
+
+工具会回答四件事：
+1. 记录时长与**断档**位置（进程被压制/回收的证据）
+2. 抓到几段**垂直运动**、各自位移多少米、步数多少
+3. **解耦有没有生效**——把"引擎输出的天气速率"与"对原始气压直接回归的朴素速率"
+   逐点对照：朴素速率在高度事件期间会飙高，引擎速率应当纹丝不动
+4. **置信闸门拦下了多少**（可信 / 窗口太短 / 趋势不稳）
+
+---
+
+## 七、构建与运行
+
+### 环境要求（本机实测的坑）
+
+工程模板的 `gradle/gradle-daemon-jvm.properties` 要求 **JDK 25**，
+而系统 `java` 可能只有 1.8。**必须显式指定 Android Studio 自带的 JBR**：
+
+```bash
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+./gradlew :app:assembleDebug
+```
+
+其余：Gradle 9.6 · AGP 9.4.0 · Kotlin 2.2.10 · compileSdk 37 · minSdk 27 · targetSdk 37。
+
+### 安装到手表
+
+```bash
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell pm grant com.yisiyun.guanfeng android.permission.BODY_SENSORS   # 可选：跳过授权弹窗
+adb shell am start -n com.yisiyun.guanfeng/.MainActivity
+```
+
+### 合规配置（已内置）
+
+- `minSdk 27` + `<uses-feature android:name="android.hardware.type.watch"/>`
+- 主题 `Theme.DeviceDefault.NoActionBar` + `windowSwipeToDismiss=true`（底层 Activity 保 `onPause`，右滑不闪烁）
+- `MainActivity` 加 `launchMode="singleTask"`（防 Monkey 验收堆出多实例）
+- 背景纯黑 + 四角安全内缩（圆角 32dp，额外内缩 9.3dp）
+
+---
+
+## 八、测试
+
+```bash
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+./gradlew :app:testDebugUnitTest
+```
+
+`PressureTrendEngineTest` 共 **13 个用例**，全部在 JVM 上运行、不依赖手表：
+
+| 用例 | 验证什么 |
+|---|---|
+| 爬五层楼被识别为高度事件而不是天气剧变 | 核心命题 |
+| 天气在缓降同时爬楼_两个分量互不污染 | 混合场景不串扰 |
+| 电梯快速升降同样被剔除 | 非步态垂直运动 |
+| 电梯匀速段加速度为零也必须被剔除 | 状态机的价值 |
+| 平地走路带步数也不会被误判为高度事件 | 防误剔 |
+| 秒级采样下噪声不得伪造成高度事件 | 30 秒基线的作用 |
+| 窗口内绝对变压低于噪声门限时一律按平稳处理 | 绝对量门限的作用 |
+| 窗口覆盖不足时即使斜率很大也不给结论 | 覆盖率闸门 |
+| 叠加振荡造成的斜率不可信时判为趋势不稳 | R² 闸门 |
+| 气压缓降时判定为缓降并给出正确速率 | 速率精度 |
+| 气压平稳时判定为平稳 | 基线 |
+| 急降映射为高降水倾向且明确标记未校准 | 规则层诚实性 |
+| 样本不足时不下结论 | 兜底 |
+
+---
+
+## 九、当前进度
+
+| 阶段 | 状态 |
+|---|---|
+| MVP-1 探针（传感器 / 键盘 / 屏幕 / 权限全量摸底） | ✅ 完成，结论已归档进 oppo-watch skill |
+| MVP-2 算法内核 + 置信闸门 + 会话落盘 + 复盘工具 | ✅ 完成，13 单测全绿、真机静置复验零误报 |
+| **真机运动验收（电梯 / 楼梯）** | ⏳ **待实测** |
+| MVP-3 3 小时窗口落库（WorkManager 短采样 + gap 标记） | 未开始 |
+| MVP-4 环形仪表 UI（黑底 + 圆心读数 + 外环趋势） | 未开始 |
+| MVP-5 腕温体感双轨（身体侧读数） | 未开始 |
+
+---
+
+## 十、未验证清单（不编）
+
+- **ECG / 血氧 / PPG 的"测量会话"触发方式**：这三个传感器 `registerListener` 返回 true
+  但零回调，疑需特定测量流程（可能涉及 OPPO 私有 SDK 或隐藏 API）。**验证前不把 UI 押上去。**
+- **语音识别引擎是否可离线调用**：Mic 硬件可原生调用已证，识别引擎未验证。
+- **PPG_RAW 16 通道的解析与标定**：原始 ADC 已实测可读，但通道语义与标定属深水区；
+  若要走 HRV 需大量实测比对。
+- **长期后台存活上限**：实测 ≥5 分钟，更长时间未测（不可当长期保证）。
+- **光学测量边界为强推断**：由 PPG_RAW 通道命名（仅 G / R / IR）推断硬件无紫外激发源，
+  未拆机、无芯片手册佐证。
+
+---
+
+## 十一、许可与归属
+
+私人自用项目，非上架产品。一笥云工作室（YiSiYunStudio）。

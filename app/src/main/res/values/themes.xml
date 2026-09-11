@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+      OPPO 硬约束两条：
+      1) 底层 Activity 必须用 DeviceDefault（或 AppCompat）主题，使其处于 onPause 而非 onStop，
+         否则右滑返回时会出现界面重绘/闪烁。
+      2) windowSwipeToDismiss 打开全局右滑返回（官方称为「应用必须遵循的规则之一」）。
+      另：手表背景主体为黑色（AMOLED 省电），用 windowBackground 兜住首帧。
+    -->
+    <style name="Theme.GuanFeng" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowSwipeToDismiss">true</item>
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+</resources>

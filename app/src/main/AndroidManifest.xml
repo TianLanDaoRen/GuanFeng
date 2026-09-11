@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- OPPO 硬约束：手表应用必须在 Manifest 声明 watch feature -->
+    <uses-feature android:name="android.hardware.type.watch" />
+
+    <!-- 心率传感器需要运行时授权（探针会主动申请并观察回调） -->
+    <uses-permission android:name="android.permission.BODY_SENSORS" />
+    <!-- 计步类传感器需要；探针顺手验证 ACTIVITY_RECOGNITION 的授权链路 -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.GuanFeng">
+
+        <!-- singleTask：官方要求，防 Monkey 验收堆出多个 MainActivity -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:launchMode="singleTask"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.GuanFeng"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>
