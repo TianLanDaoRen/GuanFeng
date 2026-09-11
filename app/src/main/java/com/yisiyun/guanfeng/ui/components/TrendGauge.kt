@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -56,8 +57,7 @@ fun TrendGauge(
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val stroke = size.minDimension * 0.075f
+        Canvas(modifier = Modifier.fillMaxSize()) {            val stroke = size.minDimension * 0.075f
             val inset = stroke / 2f
             val arcSize = Size(size.width - stroke, size.height - stroke)
 
@@ -130,6 +130,21 @@ fun TrendGauge(
                 fontSize = 11.sp,
             )
         }
+
+        // 两端标注：色区本身不自解释——主人第一次就问了"这五个颜色分别代表什么"。
+        // 只标两个极端，中间三档由游标位置与下方的趋势评级说明，避免堆字。
+        Text(
+            text = "急降",
+            color = Color(0xFFFF6B5B),
+            fontSize = 8.sp,
+            modifier = Modifier.align(Alignment.BottomStart).padding(start = 4.dp, bottom = 6.dp),
+        )
+        Text(
+            text = "急升",
+            color = Color(0xFF9BB0FF),
+            fontSize = 8.sp,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 4.dp, bottom = 6.dp),
+        )
     }
 }
 
