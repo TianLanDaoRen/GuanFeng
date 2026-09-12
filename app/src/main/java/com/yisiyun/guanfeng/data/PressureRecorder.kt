@@ -202,6 +202,9 @@ object PressureRecorder {
     private var sampleJob: Job? = null
     /** 体感传感器的脉冲调度协程（见 PULSE_INTERVAL_MS 的说明）。 */
     private var pulseJob: Job? = null
+
+    /** 天气采集任务。与判定链路完全无关的旁路，独立协程。 */
+    private var weatherJob: Job? = null
     /** 需要脉冲式开关的传感器（心率、腕温）。 */
     private var pulseSensors: List<Sensor> = emptyList()
     private var sensorManager: SensorManager? = null
@@ -414,6 +417,8 @@ object PressureRecorder {
         sensorManager?.let { unregisterPulse(it) }
         pulseJob?.cancel()
         pulseJob = null
+        weatherJob?.cancel()
+        weatherJob = null
         liveJob?.cancel()
         sampleJob?.cancel()
         scope = null
@@ -772,6 +777,22 @@ object PressureRecorder {
                         appElapsedMs = now - startedAtMs,
                         samplesLogged = logger?.rowCount ?: 0,
                     )
+                }
+            }
+
+            // ── 天气采集（旁路，不参与任何判定）──────────────────────────
+            // **必须异步派生**：这段代码所在的 sampleLoop 是传感器采样循环，
+            // 每 5 秒转一圈；在里面直接发网络请求会把传感器回调堆爆（最坏 20 秒超时）。
+            //
+            // 先查同意再查到期：没同意时 isDue 会永远为真（因为 collect 提前返回、
+            // 不更新 lastFetchAt），那样每 5 秒都会派生一个协程——虽然它们立刻返回，
+            // 但白白的调度不该有。
+            appContext?.let { context ->
+                if (WeatherConsent.isGranted(context) &&
+                    WeatherCollector.isDue(context, now) &&
+                    weatherJob?.isActive != true
+                ) {
+                    weatherJob = scope?.launch { WeatherCollector.collect(context, now) }
                 }
             }
 

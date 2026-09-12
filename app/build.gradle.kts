@@ -1,7 +1,25 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
+
+/**
+ * 和风代理的 gate key 从 local.properties 读——**不写在仓库里**。
+ *
+ * 本仓库是公开的，而这个 key 是"挡住别人蹭免费额度"的唯一一道门：
+ * 写进源码等于门不上锁。所以它走 local.properties（已 gitignore），
+ * 构建时注入 BuildConfig。克隆仓库的人没有这个值，天气采集功能会自动关闭
+ * （见 QweatherClient.isConfigured），不会误打我们的代理。
+ *
+ * 私钥则根本不在这里——它在 Vercel 的环境变量里，连这个仓库都碰不到。
+ */
+val props: Properties = run {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) Properties().apply { f.inputStream().use { load(it) } } else Properties()
+}
+val qweatherGateKey: String = props.getProperty("qweather.gateKey").orEmpty()
 
 android {
     namespace = "com.yisiyun.guanfeng"
@@ -29,6 +47,12 @@ android {
         // 仪器测试已移除（见 dependencies 段的说明）。这一行留着是**有意的**：
         // 将来若重新加仪器测试，除它之外还需要那四条 androidTestImplementation。
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // 空值也可构建（功能自动关闭），这样克隆者不配也能编译通过
+        buildConfigField("String", "QWEATHER_GATE_KEY", "\"$qweatherGateKey\"")
+
+
+        // 坐标**不设兜底值**：取不到就由设置流程明确问使用者，不替他猜（见 SiteLocation）。
     }
 
     buildTypes {
@@ -44,6 +68,8 @@ android {
     }
     buildFeatures {
         compose = true
+        // QweatherClient 要读 BuildConfig.QWEATHER_GATE_KEY
+        buildConfig = true
     }
 }
 
