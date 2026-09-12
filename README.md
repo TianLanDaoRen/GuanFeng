@@ -6,7 +6,7 @@
 
 **把气压计戴在手腕上**
 
-一个完全离线的微气象仪。它看气压的短临变化，也看你身体的反应——<br/>
+一个以离线为主的微气象仪：气压判定、打卡、关联全部在手表上完成。它看气压的短临变化，也看你身体的反应——<br/>
 然后把这两件事画在同一张图上。
 
 <br/>
@@ -14,9 +14,9 @@
 ![Platform](https://img.shields.io/badge/platform-OPPO%20Watch%204%20Pro%20(OWW221)-1F6FEB?style=flat-square)
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.2-7F52FF?style=flat-square&logo=kotlin&logoColor=white)
 ![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-100%20passing-3FB950?style=flat-square)
-![Offline](https://img.shields.io/badge/core-100%25%20offline-8957E5?style=flat-square)
-![Network](https://img.shields.io/badge/network-optional%2C%20opt--in-6E7681?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-111%20passing-3FB950?style=flat-square)
+![Offline](https://img.shields.io/badge/core%20checks-no%20network-8957E5?style=flat-square)
+![Network](https://img.shields.io/badge/weather%20%2B%20AI-optional%2C%20opt--in-6E7681?style=flat-square)
 ![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-3B7DD8?style=flat-square)
 [![AI by 卦灵AI](https://img.shields.io/badge/AI%20by-%E5%8D%A6%E7%81%B5AI%20%C2%B7%20%E5%85%8D%E8%B4%B9-8B5CF6?style=flat-square)](https://gualing.top)
 
@@ -30,7 +30,9 @@
 
 这两件事之间隔着一个变量：**气压**。天气系统来临时气压先动，人的身体往往比天气预报更早察觉。观风把这两个信号绑在一条时间轴上——**此刻的气压**，和**此刻你的身体**——然后等上几十天，让数据自己说话。
 
-它是一件个人仪器，不是一个天气 App：没有登录、没有推送、没有广告，**核心功能一次网络请求都不发**。
+它是一件个人仪器，不是一个天气 App：没有登录、没有推送、没有广告，**核心判定（气压趋势、高度解耦、打卡、关联）一次网络请求都不发**。
+后来加的天气采集是唯一的外联功能，**默认关闭、需要你显式同意**（见「天气功能」一节）。
+所有数据留在手表上。
 
 <br/>
 
@@ -42,6 +44,17 @@
 |:---:|:---:|:---:|:---:|
 | <img src="docs/screenshots/01-weather.png" width="150"/> | <img src="docs/screenshots/02-body.png" width="150"/> | <img src="docs/screenshots/03-checkin-symptom.png" width="150"/> | <img src="docs/screenshots/04-correlation.png" width="150"/> |
 | 环形仪表一眼看倾向 | 环境 × 身体并置 | 两级选择：不适 / 舒适 | 气压曲线叠上体感打卡 |
+
+</div>
+
+<div align="center">
+
+| 天气预报（负一屏） |
+|:---:|
+| <img src="docs/screenshots/07-qweather.webp" width="150"/> |
+| 负一屏：当前状况 + 未来几小时 + 7 天横条 + 读数卡片。**只读已落盘的数据，断网也能看**，代价是最多落后一个采集周期，所以把取数时刻写在副标题上 |
+
+<sub>天气数据由和风天气提供；图标用官方图标字体（CC BY 4.0）</sub>
 
 </div>
 
@@ -75,6 +88,14 @@
 
 **④ 气压 × 体感**
 把打卡点叠到气压曲线上。**黄点＝不适，绿点＝舒适**，淡色带是每小时的真实极差。下面分开报两组落在"气压大变化日"的比例——**对照组才是让症状组那个比例有意义的东西**。
+
+</td>
+</tr>
+<tr>
+<td colspan="2" valign="top">
+
+**⑤ 天气预报（负一屏）**
+往右多看一眼才到的那一页（**默认仍停在观风页**）：当前状况一个大图标、未来几小时逐行、7 天横条，下面一组读数卡片（体感 / 湿度 / 气压 / 紫外线 / 空气）。这一页**只读已经落盘的数据、自己不联网**，所以断网也能看——代价是最多落后一个采集周期，所以副标题上写着"取自几点几分"。
 
 </td>
 </tr>
@@ -130,6 +151,29 @@
 
 <br/>
 
+## 天气功能（唯一会联网的地方）
+
+气压趋势、高度解耦、打卡、关联图**一次网络请求都不发**。天气是后来加的，而且它是**这条规矩的唯一例外**——所以它被做成一个**默认关闭、需要你显式同意**的独立功能。
+
+**数据来自 [和风天气](https://www.qweather.com/)（QWeather）**，经**作者自建的 Vercel 代理**转发，不直连和风：
+
+```
+手表  →  https://qweather.gualing.top  →  Vercel（签 JWT）  →  和风
+```
+
+代理存在的唯一理由是**私钥不能进 APK**：和风新版 API 用 Ed25519 私钥签 JWT 认证，私钥与 API Host 都只存在 Vercel 的环境变量里，**客户端、仓库、APK 里都没有它们**。代理只放行四个路径前缀（`weather/v1/`、`geo/v2/`、`airquality/v1/`、`weatheralert/v1/`），并且要一个 gate key——它从 `local.properties` 注入，不写在源码里。
+
+- **采集什么**：实时实况、逐小时预报、逐天预报、空气质量、天气预警。**每 30 分钟一次**，失败 5 分钟后重试。
+- **定位怎么来**：卫星与高德**并发、卫星优先**（高德通常 1 秒就回，但仍等满卫星的 30 秒——两者精度不是一档）。两者都失败才在**设置流程**里退化为 IP 推断，**采集过程中绝不退化**，失败就沿用历史坐标。
+- **数据只存在本机**：全部写进手表上的 CSV（`qweather_now.csv` / `_hourly` / `_daily` / `_air` / `_alerts`），**只用于日后校准判据**——它不参与任何天气判定，判定只看气压计。
+- **预警会震动提醒**：同一条预警**只提醒一次**（按 id 去重），门槛用和风给的 `severity`（`moderate` 以上），不按事件名猜。
+
+> **天气数据由和风天气提供**（QWeather）。图标使用和风天气官方图标字体（**CC BY 4.0，需署名**），本项目代码部分为 MIT。
+
+天气功能的完整设计记录（为什么经代理、定位链规则、Wi-Fi 门、`location_source` 列、单文件策略、踩过的三个"看起来对但不干活"的 Android 接口、以及那个"局部问题连坐全局"的 bug）都在 [`docs/dev.md` §9.12](docs/dev.md)。
+
+<br/>
+
 ## 关于耗电
 
 手表续航是硬约束。最初的版本心率传感器**常开**，实测整机放电斜率约 **4.06 %/h**——和睡眠监测同一量级，因为它和睡眠监测一样在 24 小时开着 PPG 光电传感器。
@@ -147,8 +191,10 @@
 
 ## 隐私
 
-- **核心功能 100% 离线**：气压趋势、高度解耦、打卡、关联图，全部本地计算与本地存储。
-- **唯一联网的功能是 AI 报告**，它需要你**每次显式点按钮并在弹窗里确认**才会发起。弹窗上写清了发什么、不发什么：
+- **核心判定不依赖网络**：气压趋势、高度解耦、打卡、关联图，全部本地计算与本地存储。
+- **天气采集是唯一的外联功能，而且默认关闭、需要你显式同意**（不同意就什么都不弹、天气整条不存在）。
+  它每 30 分钟向自建代理取一次天气，并把坐标落在本机 CSV 里；关掉它，应用完全离线。
+- **另一个联网功能是 AI 报告**，它需要你**每次显式点按钮并在弹窗里确认**才会发起。弹窗上写清了发什么、不发什么：
 
 | 会上传 | 不会上传 |
 |---|---|
@@ -156,6 +202,10 @@
 | 你的体感打卡记录（**含手写备注原文**）与天气实况 | 体征逐点读数 |
 
 备注原文是刻意发上去的：标签只能归成六类，而"起床后右侧发紧"这种手写描述才包含可分析的细节。是否值得换这一次请求，由你判断。
+
+**天气采集的地址流向**：天气请求只到 `qweather.gualing.top`（作者自建的 Vercel 函数），由它转发给和风；
+定位走**高德定位 SDK**（它需要联网），IP 推断用的是 Vercel 给请求注入的来源 IP 头；
+**坐标最终落在你自己手表上的 CSV 里**，不在任何一方长期保存。
 
 <br/>
 
@@ -165,6 +215,9 @@
 
 - **所有判据阈值都没有经过本地数据校准**。3 小时降 4 hPa、速评的 0.15 hPa/5 分钟，都只有文献出处或工程判断。
 - **体感佐证尚未在真实降雨中触发过**：逻辑有单测覆盖，但没有一次"光照骤降 + 气压下降"同时出现的真机样本。
+- **天气预警的震动提醒从未真的响过**：去重与 `severity` 门槛的逻辑写在代码里，但一次真实气象预警都没遇到过，所以"该响时会不会响"没有真机证据。
+- **天气数据与自家气压计的比对还没做过**：这是天气采集存在的理由，也是下一步要做的事。
+- **户外 GPS 仍未验证**：室内锁不上星是预期内的（户外才是它的场景），但户外实际要多久、精度多少，没有测过。
 - **手表进睡眠模式会停掉一切应用**，而且不会自己回来——所以夜间必然有数小时空白。这不是故障，是平台设计；应用里做了断档即停、锁存过时即丢、归档补齐三件事来如实处理它。
 - **这不是一个上架产品**，是自己戴的东西。
 
@@ -183,7 +236,7 @@ JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
 
 - Android 11（API 30）设备，`minSdk 27` / `targetSdk 37`
 - 需要 Android Studio 自带的 JBR（工程要求 `toolchainVersion=25`）
-- 100 个单元测试全部运行在 JVM 上，**不依赖手表**：
+- **111 个单元测试**全部运行在 JVM 上，**不依赖手表**：
 
 ```bash
 ./gradlew :app:testDebugUnitTest
@@ -195,9 +248,18 @@ JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
 
 | 文件 | 内容 |
 |---|---|
-| [`docs/dev.md`](docs/dev.md) | 开发者文档：算法推导、真机实测结论、阈值出处、未验证清单 |
-| [`docs/screenshots/`](docs/screenshots/) | 界面截图 |
+| [`docs/dev.md`](docs/dev.md) | 开发者文档：算法推导、真机实测结论、阈值出处、未验证清单；天气与定位整条链路在 **§9.12** |
+| [`docs/screenshots/`](docs/screenshots/) | 界面截图（`07-qweather.webp` = 负一屏天气预报） |
 | [`docs/assets/`](docs/assets/) | 图标（SVG 源 + PNG） |
+
+> 但内容实际是 **WebP**（VP8，378×496）——它是归档时以 PNG 之名存下来的。
+> GitHub 与浏览器按内容识别，通常仍能正常显示；但文件名与格式不符会咬到那些
+> **按后缀判断类型**的工具与脚本。修法：改名为 `.webp` 并同步本 README 的引用。
+
+> **天气数据由和风天气提供**（[QWeather](https://www.qweather.com/)）。
+> 天气图标使用和风天气官方图标字体，许可为 **CC BY 4.0（需署名）**；
+> `QweatherIcons.kt` 的图标映射由官方 `qweather-icons.json` 生成，那部分为 MIT。
+> 本项目代码部分采用下方的 PolyForm Noncommercial License。
 
 <br/>
 

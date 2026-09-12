@@ -9,15 +9,16 @@ package com.yisiyun.guanfeng.ui.components
  *   · 矢量，任意尺寸都清晰（手表屏幕小，位图一放大就糊）
  *   · 可用 color 直接染色——官方 SVG 用的是 fill="currentColor"，
  *     意思就是"颜色由使用者决定"，字体天然继承这个语义
- *   · 只有一个文件（198 KB），而逐张位图要几十上百个
+ *   · 只有一个文件（约 198 KB），而逐张位图要几十上百个
  *
  * 我最初试图把 SVG 转 PNG，结果 qlmanage 渲染出来的是**白底实心图**，
  * 一染色就变成白方块——所以换成了这条正路。
  *
  * ## 这个文件是生成的，不要手改
  *
- * 数据来自官方仓库 qwd/Icons 的 font/qweather-icons.json。
- * 图标与 API 的 condition.code 一一对应。
+ * 用 `python3 tools/gen_qweather_icons.py` 重新生成。
+ * 数据来自官方仓库 qwd/Icons 的 font/qweather-icons.json；
+ * 图标与 API 的 condition.code 一一对应（3 位是天气现象、4 位是预警事件）。
  * 许可：代码 MIT、**图标 CC BY 4.0（需署名）**——署名已写在天气页底部。
  */
 object QweatherIcons {
