@@ -36,6 +36,10 @@ object AiDigest {
     ): String {
         val tagCounts = checkIns.groupingBy { it.tags }.eachCount()
         val intensityCounts = checkIns.groupingBy { it.intensity }.eachCount()
+        // 类别计数：2026-09-12 起打卡分「不适」与「舒适」两组。
+        // **必须显式发给 AI**，否则它会把你"今天很舒服"那条当成症状来描述——
+        // 两组混着解读，比少发一路输入更糟。
+        val categoryCounts = checkIns.groupingBy { it.category }.eachCount()
 
         val builder = StringBuilder()
         builder.append('{')
@@ -47,6 +51,8 @@ object AiDigest {
         builder.append("\"check_in_tags\":").append(countObject(tagCounts))
         builder.append(',')
         builder.append("\"check_in_intensity\":").append(countObject(intensityCounts))
+        builder.append(',')
+        builder.append("\"check_in_category\":").append(countObject(categoryCounts))
         // 逐条打卡明细（含手写备注原文）。
         // 曾经这里刻意不发备注，理由是"保护隐私"——但那是错的判断：
         // 标签只能归成六类，而"起床后右侧发紧"这种手写描述才包含可分析的细节，
@@ -57,6 +63,7 @@ object AiDigest {
                 checkIns.joinToString(",") { record ->
                     buildString {
                         append("{\"t\":").append(record.timestampMs)
+                        append(",\"category\":\"").append(escape(record.category)).append('"')
                         append(",\"tag\":\"").append(escape(record.tags)).append('"')
                         append(",\"intensity\":\"").append(escape(record.intensity)).append('"')
                         record.chartPressureHpa?.let { append(",\"pressure\":%.1f".format(it)) }
@@ -187,6 +194,14 @@ object AiDigest {
            标签只是归类。`body_context` 用来**排除混淆因素**：例如头痛若同时伴随腕温升高，
            发热就是不能排除的解释；若心跳与体温都正常，则气压变化的解释相对更强。
            提到体感数据时要说明其局限（腕温受环境与衣袖影响）。
+        3b. **打卡分两组，必须分开解读**：`category` 为 `symptom` 的是「不适」打卡，
+           是**事件**；为 `comfort` 的是「舒适」打卡，是**对照组**（他当时没有任何不适）。
+           `check_in_category` 给出两组的次数。
+           不要把舒适的那些条当成症状来描述，也不要把两组混在一起算比例——
+           那样的比例会因为"感觉不错"的日子也被计进分子而失真。
+           正确的说法形如："不适的 N 次里有 X 次落在气压大变化日（xx%），
+           同期舒适打卡的落点是 yy%"；两组差异才是值得说的东西，
+           而样本这么小的时候连差异也谈不上，要如实说"看不出来"。
         4. 不要使用表格、代码块或长列表——阅读终端是一块很小的手表屏幕。
            需要分段就用短段落。
 

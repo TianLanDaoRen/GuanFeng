@@ -12,18 +12,34 @@ data class CheckInRecord(
     val note: String,
     /** 解耦掉高度后的天气分量气压：绘制打卡点优先用它，避免电梯后的打卡点位错乱。 */
     val weatherPressureHpa: Float? = null,
+    /**
+     * 类别：[CATEGORY_SYMPTOM] 或 [CATEGORY_COMFORT]。
+     *
+     * 默认症状：旧文件没有这一列，而那时这一页只记不适。
+     */
+    val category: String = CATEGORY_SYMPTOM,
 ) {
+    /** 对照组（舒适）。统计要把它从症状组里分出来。 */
+    val isComfort: Boolean get() = category == CATEGORY_COMFORT
+
     /** 画图与统计都用这个：优先天气分量，旧记录退回首列的气压。 */
     val chartPressureHpa: Float? get() = weatherPressureHpa ?: pressureHpa
 }
 
 /**
- * 「舒适」——**非症状**标签，用户在体感打卡里表示"今天没什么不舒服"。
+ * 打卡的两个类别。**这是两级选择里的第一级**（2026-09-12 主人定）。
  *
- * 定义放在 core 而不是打卡页：统计口径要靠它把"对照组"从"症状组"里分出来，
- * 而 UI 层依赖 core 是正常方向，反过来（core 依赖 ui）不是。
+ * 为什么必须是独立的一维、而不是"再加一个叫舒适的标签"：
+ * 自定义文本没法归类——用户写"起床后右侧发紧"是症状，写"今天挺舒服"是对照，
+ * 而两者在文件里长得一模一样。把它们混在一个标签维度里，分母就被污染了。
+ * 单独立一维之后，类别由用户显式给出，其余字段自由。
+ *
+ * 兼容：旧记录没有这一列 → 一律按 [CATEGORY_SYMPTOM] 读
+ * （那时这一页就叫"不适打卡"，标签表也全是症状，可以断定）。
+ * 唯一一条已知的例外是主人手工判定后改过的那条，见 README 第十一节。
  */
-const val COMFORT_TAG = "舒适"
+const val CATEGORY_SYMPTOM = "symptom"
+const val CATEGORY_COMFORT = "comfort"
 
 /**
  * 气压 × 体感的观察性小结。
@@ -60,14 +76,27 @@ data class AssociationSummary(
     val checkInCount: Int,
     /** 落在「大变化日」上的打卡数。 */
     val checkInsOnBigSwingDays: Int,
+    /** 「舒适」打卡总数（对照组）。 */
+    val comfortCount: Int,
+    /** 「舒适」打卡里落在气压大变化日的次数。 */
+    val comfortOnBigSwingDays: Int,
     /** 小时均值序列（画曲线用），按小时升序。 */
     val hourly: List<HourlyBucket>,
     /** 每个大变化日的日期标签，用于展示。 */
     val bigSwingDayLabels: List<String>,
 ) {
-    /** 打卡落在气压大变化日的比例；没有打卡时返回 null（不编造 0%）。 */
+    /** 不适打卡落在气压大变化日的比例；没有打卡时返回 null（不编造 0%）。 */
     val overlapRatio: Float?
         get() = if (checkInCount == 0) null else checkInsOnBigSwingDays.toFloat() / checkInCount
+
+    /**
+     * 舒适打卡落在变化日的比例——**对照组的基准线**。
+     *
+     * 这个数才是让上面那个比例有意义的东西：如果适组和对照组差不多，
+     * 说明打卡落点跟气压没关系；对照组明显更低才有话可说。
+     */
+    val comfortRatio: Float?
+        get() = if (comfortCount == 0) null else comfortOnBigSwingDays.toFloat() / comfortCount
 }
 
 object AssociationAnalyzer {
@@ -121,16 +150,22 @@ object AssociationAnalyzer {
             .sorted()
         val bigSwingSet = bigSwingDayStarts.toHashSet()
 
-        val checkInsOnBigSwingDays = checkIns.count { record ->
+        // 两组分开算：症状组才是"事件"，对照组只是基准线。
+        // 合并成一个比值等于把"今天挺舒服"也算成不适——那正是加这一维要解决的事。
+        fun onBigSwing(records: List<CheckInRecord>) = records.count { record ->
             bigSwingSet.contains(dayStartOf(record.timestampMs, zoneOffsetMs))
         }
+        val symptoms = checkIns.filter { !it.isComfort }
+        val comforts = checkIns.filter { it.isComfort }
 
         return AssociationSummary(
             periodDays = periodDays,
             daysWithData = byDay.size,
             bigSwingDays = bigSwingDayStarts.size,
-            checkInCount = checkIns.size,
-            checkInsOnBigSwingDays = checkInsOnBigSwingDays,
+            checkInCount = symptoms.size,
+            checkInsOnBigSwingDays = onBigSwing(symptoms),
+            comfortCount = comforts.size,
+            comfortOnBigSwingDays = onBigSwing(comforts),
             hourly = sorted,
             bigSwingDayLabels = bigSwingDayStarts.map { dayLabel(it, zoneOffsetMs) },
         )

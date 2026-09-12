@@ -98,4 +98,65 @@ class AssociationAnalyzerTest {
         assertEquals(0, summary.bigSwingDays)
         assertEquals(0, summary.checkInCount)
     }
+
+    @Test
+    fun `舒适打卡是对照组_不得混进不适的比例`() {
+        val dayStart = 20_454L * day - offset
+        // 这一天是大变化日（落差 4 hPa）
+        val swingDay = listOf(bucket(dayStart, 1000f, 998f, 1002f))
+        // 另一天不是（落差 0.5 hPa）
+        val calmDay = listOf(bucket(dayStart + day, 1000f, 1000f, 1000.5f))
+        val hourly = swingDay + calmDay
+
+        fun record(daysAhead: Long, category: String) = CheckInRecord(
+            timestampMs = dayStart + daysAhead * day + hour,
+            tags = "",
+            intensity = "",
+            pressureHpa = 1000f,
+            note = "",
+            category = category,
+        )
+
+        val summary = AssociationAnalyzer.analyze(
+            hourly = hourly,
+            checkIns = listOf(
+                record(0, CATEGORY_SYMPTOM),   // 不适 · 落在变化日
+                record(1, CATEGORY_SYMPTOM),   // 不适 · 不在变化日
+                record(0, CATEGORY_COMFORT),   // 舒适 · 落在变化日
+                record(1, CATEGORY_COMFORT),   // 舒适 · 不在变化日
+            ),
+            periodDays = 7,
+            zoneOffsetMs = offset,
+        )
+
+        assertEquals("症状组只数不适的", 2, summary.checkInCount)
+        assertEquals(1, summary.checkInsOnBigSwingDays)
+        assertEquals(0.5f, summary.overlapRatio!!, 0.001f)
+
+        assertEquals("对照组单独算", 2, summary.comfortCount)
+        assertEquals(1, summary.comfortOnBigSwingDays)
+        assertEquals(0.5f, summary.comfortRatio!!, 0.001f)
+    }
+
+    @Test
+    fun `没有对照组时比例为 null_不编造 0%`() {
+        val dayStart = 20_454L * day - offset
+        val summary = AssociationAnalyzer.analyze(
+            hourly = listOf(bucket(dayStart, 1000f, 998f, 1002f)),
+            checkIns = listOf(
+                CheckInRecord(
+                    timestampMs = dayStart + hour,
+                    tags = "头痛",
+                    intensity = "中",
+                    pressureHpa = 1000f,
+                    note = "",
+                ),
+            ),
+            periodDays = 7,
+            zoneOffsetMs = offset,
+        )
+
+        assertEquals(1, summary.checkInCount)
+        assertNull("一条舒适打卡都没有时不许写 0%——那是编的", summary.comfortRatio)
+    }
 }

@@ -1,6 +1,8 @@
 package com.yisiyun.guanfeng.log
 
 import android.content.Context
+import com.yisiyun.guanfeng.core.CATEGORY_COMFORT
+import com.yisiyun.guanfeng.core.CATEGORY_SYMPTOM
 import com.yisiyun.guanfeng.core.CheckInRecord
 import java.io.File
 
@@ -22,6 +24,7 @@ object CheckInHistory {
         val iTags = header.indexOf("tags")
         val iIntensity = header.indexOf("intensity")
         val iNote = header.indexOf("note")
+        val iCategory = header.indexOf("category")
         if (iTimestamp < 0) return emptyList()
 
         val result = ArrayList<CheckInRecord>()
@@ -39,6 +42,13 @@ object CheckInHistory {
                     cells.getOrNull(iWeather)?.toFloatOrNull()
                 } else {
                     null
+                },
+                // 缺列或空值 → 症状。旧文件没有这一列，而那时这一页只记不适。
+                category = if (iCategory >= 0) {
+                    cells.getOrNull(iCategory)?.takeIf { it == CATEGORY_COMFORT }
+                        ?: CATEGORY_SYMPTOM
+                } else {
+                    CATEGORY_SYMPTOM
                 },
             )
         }

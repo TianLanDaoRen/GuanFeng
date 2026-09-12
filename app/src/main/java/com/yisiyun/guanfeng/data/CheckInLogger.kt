@@ -1,6 +1,7 @@
 package com.yisiyun.guanfeng.data
 
 import android.content.Context
+import com.yisiyun.guanfeng.core.CATEGORY_SYMPTOM
 import com.yisiyun.guanfeng.core.TrendResult
 import java.io.File
 import java.text.SimpleDateFormat
@@ -48,6 +49,12 @@ class CheckInLogger(context: Context) {
         lightLux: Float?,
         /** 解耦掉高度后的天气分量气压：关联图上的点要落在它上面，否则电梯后的打卡点位会错乱。 */
         weatherPressureHpa: Float? = null,
+        /**
+         * 类别（[CATEGORY_SYMPTOM] / [CATEGORY_COMFORT]）——两级选择里的第一级。
+         * 附加在**最后一列**：这样旧文件里没有这一列的行仍然按位置解析得上，
+         * 读出来为空即按"症状"处理（那时这一页只记不适）。
+         */
+        category: String = CATEGORY_SYMPTOM,
     ): Boolean = runCatching {
         val dateTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(timestampMs))
         val line = listOf(
@@ -65,6 +72,7 @@ class CheckInLogger(context: Context) {
             // 逗号是分隔符，正文里的半角逗号换成全角，避免破坏列结构。
             note.replace(',', '，'),
             weatherPressureHpa?.let { "%.2f".format(it) } ?: "",
+            category,
         ).joinToString(",")
         file.appendText(line + "\n")
         true
@@ -82,6 +90,6 @@ class CheckInLogger(context: Context) {
         const val HEADER =
             "timestamp_ms,datetime,pressure_hpa,delta_hpa_3h,rate_hpa_per_hour," +
                 "elevation_meters,heart_rate_bpm,wrist_temp_c,light_lux,tags,intensity,note," +
-                "weather_pressure_hpa"
+                "weather_pressure_hpa,category"
     }
 }

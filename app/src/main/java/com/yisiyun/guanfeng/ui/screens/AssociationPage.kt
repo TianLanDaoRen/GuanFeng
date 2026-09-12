@@ -177,9 +177,13 @@ fun AssociationPage(state: RecorderState) {
     val reportText by reportFlow.collectAsState()
 
     val zoneOffsetMs = remember { TimeZone.getDefault().getOffset(System.currentTimeMillis()).toLong() }
+    // 门槛数的是**两种类别加起来**的打卡数。
+    // 原先只数症状——于是"只记了一条舒适"时按钮是灰的，
+    // 而那条舒适恰恰就是对照组数据，AI 报告本来就有话可说。
+    val reportCheckIns = current?.let { it.checkInCount + it.comfortCount } ?: 0
     val readyForReport = current != null &&
         current.daysWithData >= MIN_DAYS_FOR_REPORT &&
-        current.checkInCount >= 1
+        reportCheckIns >= 1
 
     fun startReport() {
         val snapshot = current ?: return
@@ -273,8 +277,10 @@ fun AssociationPage(state: RecorderState) {
                     )
                     // 一行一件事。原先三件事挤在一行里（打卡数 · 大变化日 · 落在其上的打卡），
                     // 既读不清哪个数字对应什么，也容易被当成一个整体去理解——主人提得对。
+                    // 两组分开报：症状组是"事件"，舒适组是**基准线**。
+                    // 合成一个比值等于把"今天挺舒服"也算成不适——那正是加类别这一维要解决的事。
                     Text(
-                        text = "体感打卡 ${current.checkInCount} 次",
+                        text = "不适 ${current.checkInCount} 次 · 舒适 ${current.comfortCount} 次",
                         color = Color(0xFFD0D0D0),
                         fontSize = 9.sp,
                     )
@@ -286,16 +292,27 @@ fun AssociationPage(state: RecorderState) {
                     val overlap = current.overlapRatio
                     Text(
                         text = if (overlap == null) {
-                            "还没有体感打卡记录"
+                            "不适打卡还没有记录"
                         } else {
-                            "其中落在变化日 ${current.checkInsOnBigSwingDays} 次（%.0f%%）"
+                            "不适落在变化日 ${current.checkInsOnBigSwingDays} 次（%.0f%%）"
                                 .format(overlap * 100)
                         },
                         color = Color(0xFFE8C36A),
                         fontSize = 9.sp,
                     )
+                    val comfortRatio = current.comfortRatio
                     Text(
-                        text = "青线＝气压（已去高度） · 黄点＝体感打卡",
+                        text = if (comfortRatio == null) {
+                            "舒适打卡还没有记录（它是对照组）"
+                        } else {
+                            "舒适落在变化日 ${current.comfortOnBigSwingDays} 次（%.0f%%）"
+                                .format(comfortRatio * 100)
+                        },
+                        color = Color(0xFF6EE7A8),
+                        fontSize = 9.sp,
+                    )
+                    Text(
+                        text = "青线＝气压（已去高度） · 黄点＝不适 · 绿点＝舒适",
                         color = Color(0xFF5E6A72),
                         fontSize = 7.sp,
                     )
@@ -331,7 +348,7 @@ fun AssociationPage(state: RecorderState) {
                 } else {
                     Text(
                         text = "数据不足：需至少 1 天气压记录与 1 次体感打卡（当前 ${current.daysWithData} 天 / " +
-                            "${current.checkInCount} 次）",
+                            "$reportCheckIns 次）",
                         color = Color(0xFF8A8A8A),
                         fontSize = 8.sp,
                         lineHeight = 10.sp,
@@ -642,7 +659,11 @@ private fun PressureCheckInChart(
                         ?.avgHpa
                         ?: return@forEach
                     val center = Offset(xOf(record.timestampMs), yOf(pressure))
-                    drawCircle(Color(0xFFE8C36A), radius = 3.6f, center = center)
+                    // 按类别分色：不适＝琥珀、舒适＝青绿。
+                    // 两组一分开，这张图才真正在回答"我和气压有没有关系"——
+                    // 只看一种点只能说"扎堆"，两组对照才知道扎堆是不是稀奇。
+                    val dotColor = if (record.isComfort) Color(0xFF6EE7A8) else Color(0xFFE8C36A)
+                    drawCircle(dotColor, radius = 3.6f, center = center)
                     drawCircle(Color(0xFF1A1408), radius = 1.4f, center = center)
                 }
             }
