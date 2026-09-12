@@ -69,6 +69,13 @@ fun ForecastPage(
             subtitle = snapshot?.let { "取自 ${it.fetchedClock}" } ?: "尚未采集",
         )
 
+        // 诊断：页面渲染时它手里到底有什么。数据"在文件里却显示没有"时，
+        // 这一行能立刻分清是"读不到"还是"没接到"。
+        android.util.Log.i(
+            "ForecastPage",
+            "渲染：snapshot=" + (snapshot != null) + " days=" + days.size +
+                " air=" + (air != null) + " 已同意=" + consentGranted,
+        )
         when {
             !consentGranted -> EmptyState(
                 text = "还没开启天气采集。开启后每 30 分钟取一次和风天气，" +

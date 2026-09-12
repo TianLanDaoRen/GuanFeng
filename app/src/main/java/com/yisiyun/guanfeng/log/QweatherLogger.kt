@@ -354,6 +354,10 @@ object QweatherLogger {
             category = col("category"),
             primaryPollutant = col("primary_pollutant"),
         )
+    }.onFailure {
+        // **失败必须留痕**：天气页一直显示"还没有采到数据"，而数据其实在文件里时，
+        // 最容易发生的事就是这里的异常被 getOrNull() 静默吃掉、谁都查不出为什么。
+        android.util.Log.w("QweatherLogger", "读快照失败", it)
     }.getOrNull()
 
     /** 天气页横条上的一天。 */
@@ -415,12 +419,25 @@ object QweatherLogger {
      */
     fun readLatestSnapshot(context: Context): Snapshot? = runCatching {
         val nowFile = File(directory(context), NOW_FILE)
+        // 诊断日志：读不到数据时，"它到底看了哪个目录、文件在不在"是唯一能一刀切开的问题。
+        // 我在这一处连着猜了两次（先猜 split 转义、又猜异常），两次都错——
+        // 正确做法本来就是一上来先把这三件事打出来。
+        android.util.Log.i(
+            "QweatherLogger",
+            "读快照 目录=" + nowFile.parent + " 文件=" + nowFile.name +
+                " 存在=" + nowFile.exists() + " 字节=" + nowFile.length(),
+        )
         if (!nowFile.exists()) return null
         // 尾部读取的第一行可能是半截，认表头时必须那一行**确实是表头**（以 timestamp_ms 开头）
         val nowAll = readTailLines(nowFile, 8 * 1024).filter { it.isNotBlank() }
         val nowHeader = nowAll.firstOrNull { it.startsWith("timestamp_ms") }?.split(",")
             ?: NOW_HEADER.split(",")
         val nowCells = nowAll.last().split(",")
+        android.util.Log.i(
+            "QweatherLogger",
+            "读快照 解析：尾部行数=" + nowAll.size + " 表头列数=" + nowHeader.size +
+                " 数据列数=" + nowCells.size,
+        )
         if (nowCells.size < 3) return null
         fun cell(name: String): String {
             val index = nowHeader.indexOf(name)
@@ -435,8 +452,13 @@ object QweatherLogger {
             if (lines.size < 2) {
                 emptyList()
             } else {
+                // **尾部窗口里可能没有表头那一行**：逐小时文件会长到几十 KB，
+                // 读尾部时表头早已在窗口之外。所以找不到时退回**已知的常量表头**，
+                // 绝不能像第一版那样 `return null`——那是**非局部返回**，
+                // 会把整个快照一起丢掉：数据明明解析成功了(10 行 24 列)，页面却显示"没有数据"，
+                // 而真正的起因只是"小时列表读不到"。一个局部问题不该让全局失败。
                 val header = lines.firstOrNull { it.startsWith("fetched_ms") }?.split(",")
-                    ?: return@runCatching null
+                    ?: HOURLY_HEADER.split(",")
                 val rows = lines.drop(1).map { it.split(",") }
                 val fetchedIndex = header.indexOf("fetched_ms")
                 // 取最后一次采集的那一组
