@@ -29,6 +29,9 @@ import kotlinx.coroutines.launch
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -66,13 +69,16 @@ fun GuanFengApp() {
     // SharedPreferences 记一个布尔值就够，不需要为"问过一次了"这种状态上数据库。
     // 天气采集的**设置流程**：说明 → 定位 → （失败时的）出路。
     // 已经同意过、也已经有坐标时，整个流程不再出现。见 ForecastSetupOverlay 的注释。
+    // 状态机的顺序是主人定的：**先问同意 → 同意了才门控 Wi-Fi → 再走定位**。
+    // 不同意就不同意了：什么都不弹，天气功能整条不存在。
     var setupStep by remember {
         mutableStateOf<WeatherSetupStep?>(
             when {
                 !WeatherConsent.hasDecided(context) -> WeatherSetupStep.Consent
-                // 同意过但还没有坐标（例如上次定位失败、或表格刚升级）→ 直接进定位
-                WeatherConsent.isGranted(context) && !SiteLocation.hasRemembered(context) ->
-                    WeatherSetupStep.Locating(0)
+                !WeatherConsent.isGranted(context) -> null
+                !SiteLocation.wifiEnabled(context) -> WeatherSetupStep.NeedWifi
+                // 同意过、Wi-Fi 也开着，但还没有坐标（上次定位失败、或表格刚升级）→ 直接进定位
+                !SiteLocation.hasRemembered(context) -> WeatherSetupStep.Locating(0)
                 else -> null
             },
         )
@@ -82,7 +88,8 @@ fun GuanFengApp() {
     fun startLocating() {
         setupStep = WeatherSetupStep.Locating(0)
         scope.launch {
-            val fix = SiteLocation.acquire(context)
+            // 卫星与高德并发，卫星优先（等满 30 秒）；都没成才退到 IP 推断
+            val fix = SiteLocation.acquirePreferringGps(context)
             if (fix != null) {
                 setupStep = null
                 return@launch
@@ -107,6 +114,27 @@ fun GuanFengApp() {
         // 给不给都往下走：没权限时 acquire 会立刻返回 null，落到失败界面让使用者看见原因，
         // 而不是停在一个转圈的哑巴界面上。
         startLocating()
+    }
+
+    // Wi-Fi 门是**实时的**：用户在系统面板里开完 Wi-Fi 回来，这里应当自动放行进入定位。
+    // 只在门开着的时候轮询——一个本地属性读取，代价可忽略。
+    //
+    // **必须等 Wi-Fi 真正就绪，而不是开关一拨就走**：实测开关变成"开"的瞬间，
+    // Wi-Fi 协议栈还没起来，高德立刻回 error 19「没有检查到SIM卡，并且关闭了WIFI开关」，
+    // 于是两个来源全部失败、白白落到 IP 推断。所以要求它**连续为真三秒**才放行。
+    val needWifi = setupStep is WeatherSetupStep.NeedWifi
+    LaunchedEffect(needWifi) {
+        if (needWifi) {
+            var stableSeconds = 0
+            while (true) {
+                delay(1_000)
+                stableSeconds = if (SiteLocation.wifiEnabled(context)) stableSeconds + 1 else 0
+                if (stableSeconds >= 3) {
+                    startLocating()
+                    break
+                }
+            }
+        }
     }
 
     // 定位中的秒数。**key 用布尔值**：状态本身每秒都在变，用状态做 key 会让协程每秒重启。
@@ -164,16 +192,24 @@ fun GuanFengApp() {
         setupStep?.let { step ->
             ForecastSetupOverlay(
                 step = step,
+                onOpenWifi = { SiteLocation.openWifiPanel(context) },
+                onExitApp = { context.findActivity()?.finish() },
                 onAllow = {
                     WeatherConsent.grant(context)
-                    // FINE + COARSE 一起要：GPS 必须 FINE，Wi-Fi/网络定位用 COARSE。
-                    // 用户如果只给了 COARSE，混合定位里的网络那一路仍然可用。
-                    locationPermission.launch(
-                        arrayOf(
-                            android.Manifest.permission.ACCESS_FINE_LOCATION,
-                            android.Manifest.permission.ACCESS_COARSE_LOCATION,
-                        ),
-                    )
+                    // **同意之后必须先过 Wi-Fi 门**（主人定的顺序：先问同意，同意了才门控 Wi-Fi）。
+                    // 这里不能直接去要权限：状态机只在首次组合时求值，那一刻还没同意，
+                    // 走的是"同意"那一支——Wi-Fi 检查得在这里主动做一次。
+                    if (!SiteLocation.wifiEnabled(context)) {
+                        setupStep = WeatherSetupStep.NeedWifi
+                    } else {
+                        // FINE + COARSE 一起要：GPS 必须 FINE，Wi-Fi/网络定位用 COARSE。
+                        locationPermission.launch(
+                            arrayOf(
+                                android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                android.Manifest.permission.ACCESS_COARSE_LOCATION,
+                            ),
+                        )
+                    }
                 },
                 onDecline = {
                     WeatherConsent.decline(context)
@@ -197,4 +233,19 @@ fun GuanFengApp() {
             )
         }
     }
+}
+
+/**
+ * 从 Compose 的 LocalContext 拿到 Activity。
+ *
+ * Compose 给的往往是 ContextWrapper，直接 as Activity 会崩；必须一层层剥到真正的 Activity。
+ * 用在"退出应用"上——主人的 Wi-Fi 门要求不打开 Wi-Fi 就退出，那是真的退出，不是返回上一页。
+ */
+private fun Context.findActivity(): Activity? {
+    var current = this
+    while (current is ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    return null
 }

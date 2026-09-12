@@ -4,6 +4,7 @@ import com.yisiyun.guanfeng.data.QweatherClient
 import java.util.Locale
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -130,5 +131,22 @@ class QweatherLoggerTest {
         // 空/缺失：新文件，不需要轮转（本来就会写表头）
         assertEquals(false, QweatherLogger.needsRotation(null, "a,b,c"))
         assertEquals(false, QweatherLogger.needsRotation("", "a,b,c"))
+    }
+
+    @Test
+    fun `只是往后加了列_可以无损就地迁移_保持单文件`() {
+        // 这正是真实的那个场景：给实时表加 location_source
+        assertTrue(QweatherLogger.canPadToMatch("a,b,c", "a,b,c,d"))
+        assertTrue(QweatherLogger.canPadToMatch("a,b,c", "a,b,c,d,e"))
+    }
+
+    @Test
+    fun `列的顺序或含义变了_不可就地补齐_必须归档`() {
+        // 旧表头不是新表头的前缀：旧行补空值也对不上，硬补就是静默错位
+        assertFalse(QweatherLogger.canPadToMatch("a,b,c", "a,c,b,d"))
+        assertFalse(QweatherLogger.canPadToMatch("a,b,c", "a,b,d"))
+        // 反而变短了：更不该猜
+        assertFalse(QweatherLogger.canPadToMatch("a,b,c", "a,b"))
+        assertFalse(QweatherLogger.canPadToMatch(null, "a,b,c"))
     }
 }

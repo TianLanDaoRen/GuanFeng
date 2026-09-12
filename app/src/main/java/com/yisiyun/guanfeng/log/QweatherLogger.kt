@@ -153,10 +153,23 @@ object QweatherLogger {
      * 真机上就撞到过：给实时表加了 location_source 之后，旧文件还是 23 列表头、
      * 新行 24 列，用旧表头一读，http_ms 那一列显示的是 `amap:4`。
      *
+     * **但优先就地迁移而不是另存**（主人强调的单文件原则）：
+     * 如果旧表头是新表头的**前缀**（也就是我们只是往后加了列），那旧行只要补空值就能
+     * 与新区头对齐，信息一点不丢——这时就地补齐、原子改名，**始终保持一个文件**。
+     * 只有列的顺序/含义真的变了（旧表头不是前缀）才另存归档，因为那时旧行无法安全对齐。
+     *
      * 抽成纯函数是为了能写 JVM 单测——文件操作要 Context，判断逻辑不需要。
      */
     fun needsRotation(existingHeader: String?, expectedHeader: String): Boolean =
         !existingHeader.isNullOrBlank() && existingHeader != expectedHeader
+
+    /** 旧表头是不是新表头的前缀（即"只是往后加了列"）。这种情况可以无损就地补齐。 */
+    fun canPadToMatch(existingHeader: String?, expectedHeader: String): Boolean {
+        if (existingHeader.isNullOrBlank()) return false
+        val old = existingHeader.split(",")
+        val new = expectedHeader.split(",")
+        return old.size < new.size && new.subList(0, old.size) == old
+    }
 
     /** 追加一行；文件不存在则写表头，表头变了则把旧文件归档后另起。返回是否成功。 */
     fun append(context: Context, fileName: String, header: String, row: String): Boolean = runCatching {
@@ -168,7 +181,7 @@ object QweatherLogger {
         true
     }.getOrDefault(false)
 
-    /** 表头变了就把旧文件改名留档，返回应当写入的目标文件。 */
+    /** 表头与文件不符时先处理，返回应当写入的目标文件。 */
     private fun rotateIfNeeded(context: Context, fileName: String, header: String): File {
         val target = File(directory(context), fileName)
         val existing = if (target.exists() && target.length() > 0L) {
@@ -176,11 +189,47 @@ object QweatherLogger {
         } else {
             null
         }
-        if (needsRotation(existing, header)) {
+        if (!needsRotation(existing, header)) return target
+
+        if (canPadToMatch(existing, header)) {
+            // 只是加了列：就地补齐每行的空值，换掉表头，**仍然只有一个文件**。
+            migrateInPlace(target, header)
+        } else {
+            // 列的顺序或含义变了：旧行无法安全对齐，只能另存归档
             val archived = File(directory(context), "$fileName.${System.currentTimeMillis()}.old")
             target.renameTo(archived)
         }
         return target
+    }
+
+    /**
+     * 就地迁移：给每一行补足空值并换成新表头。
+     *
+     * 先写临时文件再原子改名——中途断电也不会留下半截文件（那才是最坏的结果：
+     * 文件还在、但内容被截断，而且你看不出来）。
+     */
+    private fun migrateInPlace(target: File, header: String) {
+        val columns = header.split(",").size
+        val temp = File(target.parentFile, target.name + ".migrating")
+        temp.bufferedWriter().use { out ->
+            out.write(header)
+            out.newLine()
+            target.bufferedReader().useLines { lines ->
+                lines.drop(1).forEach { line ->
+                    if (line.isBlank()) return@forEach
+                    val cells = line.split(",")
+                    val fixed = if (cells.size < columns) {
+                        cells + List(columns - cells.size) { "" }
+                    } else {
+                        cells
+                    }
+                    out.write(fixed.joinToString(","))
+                    out.newLine()
+                }
+            }
+        }
+        target.delete()
+        temp.renameTo(target)
     }
 
     /**

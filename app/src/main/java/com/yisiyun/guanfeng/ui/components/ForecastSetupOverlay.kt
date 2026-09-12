@@ -44,6 +44,14 @@ sealed interface WeatherSetupStep {
     /** 还没问过：说明会上传什么。 */
     data object Consent : WeatherSetupStep
 
+    /**
+     * 已同意定位，但手表的 **Wi-Fi 模块没开**。
+     *
+     * 顺序是主人定的：**先问同意，同意了才门控 Wi-Fi**——不同意就什么都不做，
+     * 不该拿 Wi-Fi 去为难一个根本不想用天气功能的人。
+     */
+    data object NeedWifi : WeatherSetupStep
+
     /** 正在取定位。 */
     data class Locating(val elapsedSeconds: Int) : WeatherSetupStep
 
@@ -60,6 +68,8 @@ sealed interface WeatherSetupStep {
 @Composable
 fun ForecastSetupOverlay(
     step: WeatherSetupStep,
+    onOpenWifi: () -> Unit = {},
+    onExitApp: () -> Unit = {},
     onAllow: () -> Unit,
     onDecline: () -> Unit,
     onCancelLocating: () -> Unit,
@@ -74,6 +84,29 @@ fun ForecastSetupOverlay(
     ) {
         when (step) {
             is WeatherSetupStep.Consent -> ConsentBody(onAllow = onAllow, onDecline = onDecline)
+
+            is WeatherSetupStep.NeedWifi -> {
+                Text("需要打开 Wi-Fi", color = Color(0xFF7FD1E8), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(7.dp))
+                Text(
+                    "定位要扫描周边热点来判断你在哪，取天气也要联网。",
+                    color = Color(0xFFD0D0D0),
+                    fontSize = 9.sp,
+                    lineHeight = 12.sp,
+                )
+                Spacer(Modifier.height(5.dp))
+                Text(
+                    "打开即可，连不连上热点都行——扫描本身就够用。",
+                    color = Color(0xFF9A9A9A),
+                    fontSize = 9.sp,
+                    lineHeight = 12.sp,
+                )
+                Spacer(Modifier.weight(1f))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FullWidthButton("打开 Wi-Fi 设置", Color(0xFF2A6C86), Color(0xFFD8F2FA), onOpenWifi)
+                    FullWidthButton("退出应用", Color(0xFF242424), Color(0xFF9A9A9A), onExitApp)
+                }
+            }
 
             is WeatherSetupStep.Locating -> {
                 Text("正在定位…", color = Color(0xFF7FD1E8), fontSize = 13.sp, fontWeight = FontWeight.Bold)

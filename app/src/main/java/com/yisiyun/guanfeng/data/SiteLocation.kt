@@ -2,8 +2,12 @@ package com.yisiyun.guanfeng.data
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.provider.Settings
 import android.location.LocationManager
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import com.amap.api.location.AMapLocationClient
 import com.amap.api.location.AMapLocationClientOption
 import kotlinx.coroutines.Dispatchers
@@ -67,6 +71,63 @@ object SiteLocation {
     /** 坐标的小数位。天气尺度用不到更多精度，粗一点反而更稳。 */
     private const val DECIMALS = 3
 
+    /**
+     * **Wi-Fi 模块是否开着**（注意：不要求连上任何热点）。
+     *
+     * 这是整个天气功能的前提，原因有二：
+     * 1. 高德的网络定位靠**扫描周边热点**，官方原话是"依赖设备开启 WIFI 模块
+     *    （不必链接上 WIFI）"——模块关着，它就只剩 GPS 一条腿，室内必然失败；
+     * 2. 取天气数据本身也要联网。
+     *
+     * 所以设置流程拿它当门槛：没开就先去开，开完（连不连都行）再往下走。
+     */
+    fun wifiEnabled(context: Context): Boolean = runCatching {
+        // **不能用 WifiManager.isWifiEnabled()**：它自 Android 10 起对目标 Q+ 的应用
+        // 恒返回 true，已经不再反映真实状态——真机上实测 Wi-Fi 明明关着，它也说 true，
+        // 于是这道门控形同虚设。这是第三个"看起来对但不干活"的 Android API
+        // （前两个：GPS 要 FINE 权限、前台服务要声明 location 类型）。
+        //
+        // 读全局设置 WIFI_ON 才可靠：与 adb 的 `settings get global wifi_on` 同源，
+        // 关是 0、开是 1，实测两个状态都对得上。
+        Settings.Global.getInt(context.contentResolver, Settings.Global.WIFI_ON, 0) != 0
+    }.getOrDefault(false)
+
+    /** 一键直达系统的 Wi-Fi 面板（普通应用无权直接开 Wi-Fi，只能把用户送过去）。 */
+    fun openWifiPanel(context: Context) {
+        val panel = Intent("android.settings.panel.action.WIFI")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val settings = Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(panel) }
+            .recoverCatching { context.startActivity(settings) }
+            .onFailure { Log.w(TAG, "打不开 Wi-Fi 设置", it) }
+    }
+
+    /**
+     * **卫星与高德并发竞争，卫星优先**（主人定的流程）。
+     *
+     * 为什么高德明明 1 秒就回来，还要等 GPS 满 30 秒：两者的精度不是一档。
+     * 高德室内是 30 米级（Wi-Fi/基站推算），卫星是米级。**能拿更准的，就别用次准的**——
+     * 而这个坐标要陪我们做几周的校准，精度越高，"气压与体感"的对照才越干净。
+     *
+     * 只有 GPS 在 30 秒内交不出来（室内就是这种情况），才接受高德的结果。
+     */
+    suspend fun acquirePreferringGps(
+        context: Context,
+        timeoutMs: Long = GPS_TIMEOUT_MS,
+    ): Fix? = coroutineScope {
+        val gps = async { systemFix(context, preferred = LocationManager.GPS_PROVIDER, timeoutMs) }
+        val amap = async { amapFix(context, timeoutMs) }
+
+        val gpsFix = gps.await()
+        if (gpsFix != null) {
+            amap.cancel() // 卫星到手，另一路不必再等
+            remember(context, gpsFix)
+            return@coroutineScope gpsFix
+        }
+        amap.await()?.also { remember(context, it) }
+    }
+
     /** 是否**历史上真的成功取到过**坐标。失败界面靠它决定要不要给"用上次记录的坐标"。 */
     fun hasRemembered(context: Context): Boolean =
         prefs(context).getString(KEY_LAT, null) != null
@@ -124,71 +185,15 @@ object SiteLocation {
      * 而采集本身（每 30 分钟）只读已记录的坐标，不会再碰 GPS。
      * 室内锁不上星是真实存在的，所以**超时后必须给明确的失败出口**，不能卡死。
      */
-    suspend fun acquire(
-        context: Context,
-        gpsTimeoutMs: Long = GPS_TIMEOUT_MS,
-        networkTimeoutMs: Long = NETWORK_TIMEOUT_MS,
-    ): Fix? {
-        // 先捡现成的：瞬时、零成本
-        fromSystem(context)?.let {
-            remember(context, it)
-            return it
-        }
-        if (!hasPermission(context)) {
-            Log.w(TAG, "没有定位权限，无法定位")
-            return null
-        }
-
-        // **第一顺位：高德融合定位**。它自己把 Wi-Fi、基站、GPS 揉在一起，
-        // 所以室内也能出结果——这正是系统那套在这台表上做不到的事
-        // （本机只有 passive 与 gps 两个 provider，没有 network provider）。
-        amapFix(context, gpsTimeoutMs)?.let {
-            remember(context, it)
-            return it
-        }
-
-        val manager = runCatching {
-            context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        }.getOrNull() ?: return null
-
-        // **混合定位**：先走网络/Wi-Fi（室内也能用、通常几秒），再走 GPS（精确但要求见天）。
-        // 网络那一路只吃 COARSE 权限，所以用户即便只给了粗定位，这条仍然可用。
-        // 每个源给**各自**的超时，而不是从总预算里对半分——否则网络那一截会把 GPS 的
-        // 30 秒吃掉一半。本机没有 network provider 时它是瞬间返回的，不吃时间。
-        val plan = listOf(
-            Triple(LocationManager.NETWORK_PROVIDER, networkTimeoutMs, hasPermission(context)),
-            Triple(LocationManager.GPS_PROVIDER, gpsTimeoutMs, hasFinePermission(context)),
-        )
-
-        for ((provider, timeout, permitted) in plan) {
-            if (!permitted) {
-                Log.i(TAG, "$provider 跳过：缺权限")
-                continue
-            }
-            if (!runCatching { manager.isProviderEnabled(provider) }.getOrDefault(false)) {
-                Log.i(TAG, "$provider 跳过：provider 未启用")
-                continue
-            }
-            val location = withTimeoutOrNull(timeout) { singleUpdate(manager, provider) }
-            if (location == null) {
-                Log.i(TAG, "$provider 未在 ${timeout}ms 内给出位置")
-                continue
-            }
-            val fix = Fix(round(location.latitude), round(location.longitude), "acquired:$provider")
-            remember(context, fix)
-            Log.i(TAG, "定位成功：$provider ${fix.lat},${fix.lon}")
-            return fix
-        }
-        Log.w(TAG, "所有定位源都没给出位置")
-        return null
-    }
-
     /**
-     * 用**网络推断**的位置作为兜底（IP 定位，见 QweatherClient.fetchNetworkLocation）。
+     * 用**网络推断**的位置作为兜底（IP 定位，见 [QweatherClient.fetchNetworkLocation]）。
      *
      * 与"配置里的兜底坐标"有本质区别：那个是**替使用者猜**，这个是**测量**——
-     * 测的是"这台设备所在的网络出口在哪"，来源会如实写进 CSV。
+     * 测的是"这台设备所在的网络出口在哪"，来源会如实写进 CSV 的 location_source 列。
      * 主人对前者的反对是对的，对后者不成立。
+     *
+     * 只在**设置流程**里用：卫星与高德都失败时的最后一步。采集过程中绝不走这条，
+     * 因为 IP 是城市级，长期自动采集里悄悄降精度是没人会发现的那种坏。
      */
     suspend fun networkFix(context: Context): Fix? {
         val result = QweatherClient.fetchNetworkLocation()
@@ -202,35 +207,35 @@ object SiteLocation {
     }
 
     /**
-     * 采集周期里的**静默刷新**：试一次定位（默认 100 秒），失败就沿用历史坐标。
-     *
-     * 这是主人定的策略——每 30 分钟采数据时顺带更新一次位置，但不为此打断任何东西：
-     * 拿到新的就用新的，拿不到就继续用上次真取到过的那个，**绝不因此停止采集**。
-     * 与设置流程里那次"拿到才继续"是两回事：第一次必须确知在哪，之后只需保持新鲜。
+     * 采集周期里的**静默刷新**：卫星与高德并发（卫星优先，等满 30 秒），
+     * 都没成则沿用历史坐标。**不退化成 IP**——这条只在设置流程里走一次。
      */
     suspend fun refreshOrRemember(context: Context, gpsTimeoutMs: Long = GPS_TIMEOUT_MS): Fix? =
-        acquire(context, gpsTimeoutMs = gpsTimeoutMs)
-            ?: recalled(context)?.also { Log.i(TAG, "静默刷新未成功，沿用历史坐标：${it.source}") }
-            // 连历史都没有（还没设置过就自己跑起来了）→ 问一次网络。
-            // 拿到就会被记住，所以这条路径最多走一次。
-            ?: networkFix(context)
+        acquirePreferringGps(context, timeoutMs = gpsTimeoutMs)
+            ?: recalled(context)?.also { Log.i(TAG, "卫星与高德都没成，沿用历史坐标：${it.source}") }
 
     /**
-     * 高德定位（一次）。
-     *
-     * ## 两个必须照做的细节
-     *
-     * 1. **隐私合规接口必须先调**。高德 SDK 自 2021 年起要求先声明隐私政策并取得同意，
-     *    否则**静默不定位**——不报错、不回调，只会一直等到超时。所以这个调用被绑在
-     *    我们自己的同意开关后面：用户没同意，我们连 SDK 都不初始化。
-     * 2. **客户端要在主线程构造**（官方要求）。这里是协程，所以显式切到 Main。
-     *
-     * ## 日志里为什么要打 locationType
-     *
-     * 它是判断"这次到底靠什么定位成功"的唯一依据：Wi-Fi 定位、基站定位、还是 GPS。
-     * 我们要验证的核心问题就是**室内能不能靠网络那两路拿到结果**——只看有没有坐标
-     * 分不出这一点，必须看类型。
+     * 取一次系统位置（只用一个 provider）。高德并发那一路走 [amapFix]，
+     * 所以这里只剩它自己——不再需要"先网络后 GPS"的顺序，因为顺序已经由并发策略决定了。
      */
+    private suspend fun systemFix(context: Context, preferred: String, timeoutMs: Long): Fix? {
+        if (!hasFinePermission(context)) return null
+        val manager = runCatching {
+            context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        }.getOrNull() ?: return null
+        if (!runCatching { manager.isProviderEnabled(preferred) }.getOrDefault(false)) {
+            Log.i(TAG, "$preferred 未启用")
+            return null
+        }
+        val location = withTimeoutOrNull(timeoutMs) { singleUpdate(manager, preferred) }
+        if (location == null) {
+            Log.i(TAG, "$preferred 未在 ${timeoutMs}ms 内给出位置")
+            return null
+        }
+        Log.i(TAG, "$preferred 成功：精度=${location.accuracy}m")
+        return Fix(round(location.latitude), round(location.longitude), "system:$preferred")
+    }
+
     private suspend fun amapFix(context: Context, timeoutMs: Long): Fix? = withTimeoutOrNull(timeoutMs) {
         withContext(Dispatchers.Main) {
             // 客户端必须在主线程构造（官方要求）。构造失败就直接放弃，别把 null 传下去。
