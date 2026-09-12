@@ -185,9 +185,11 @@ private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
             modifier = Modifier.weight(1f),
         )
         MetricCard(
-            // 紫外线值得单独一格：它是整份数据里**唯一没法从别处推出来**的一项
-            label = "紫外线",
-            value = snapshot.uvIndex.ifBlank { "—" },
+            // 紫外线值得单独一格：它是整份数据里**唯一没法从别处推出来**的一项。
+            // 显示"当前 / 今日峰值"而不是只显示当前：**每天有半天当前值是 0**，
+            // 傍晚看到"0"虽然正确却没信息量；而峰值才是"要不要防晒"的依据。
+            label = "紫外线 当前/峰值",
+            value = snapshot.uvIndex.ifBlank { "—" } + " / " + (days.firstOrNull()?.uvMax?.ifBlank { "—" } ?: "—"),
             unit = "",
             valueColor = Color(0xFFE8C36A),
             modifier = Modifier.weight(1f),

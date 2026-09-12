@@ -366,6 +366,7 @@ object QweatherLogger {
         val conditionCode: String,
         val maxC: String,
         val minC: String,
+        val uvMax: String,
     )
 
     /**
@@ -390,6 +391,7 @@ object QweatherLogger {
                 conditionCode = col(it, "condition_code"),
                 maxC = col(it, "temp_max_c"),
                 minC = col(it, "temp_min_c"),
+                uvMax = col(it, "uv_index_max"),
             )
         }
     }.getOrDefault(emptyList())
