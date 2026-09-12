@@ -19,6 +19,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import com.yisiyun.guanfeng.data.WeatherConsent
 import com.yisiyun.guanfeng.ui.components.AlertConfirmOverlay
 import com.yisiyun.guanfeng.data.QweatherClient
+import com.yisiyun.guanfeng.data.WeatherCollector
 import com.yisiyun.guanfeng.log.QweatherLogger
 import com.yisiyun.guanfeng.ui.screens.ForecastPage
 import kotlinx.coroutines.Dispatchers
@@ -125,6 +126,11 @@ fun GuanFengApp() {
             val fix = SiteLocation.acquirePreferringGps(context)
             if (fix != null) {
                 setupStep = null
+                // **立刻采一次**。
+                // 不这么做的话，用户刚开启天气功能会看到"还没有采到数据"，
+                // 而真相是"主循环下一次采集要等最多 5 分钟"——那是个没必要让人等的时间。
+                // 刚拿到坐标正是最该马上取数的时刻：此刻的天气对应此刻的位置。
+                runCatching { WeatherCollector.collect(context) }
                 return@launch
             }
             // GPS 没定上：先问一次网络推断（IP 定位），拿到就摆给使用者看，由他决定。
