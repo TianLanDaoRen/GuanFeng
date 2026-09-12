@@ -222,18 +222,28 @@ private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
 
 
     Spacer(Modifier.height(10.dp))
-    } // 竖向滚动容器到此结束
-
-    Spacer(Modifier.height(6.dp))
-    Text(
-        // 定位来源要写出来：它决定这份预报的可信范围（高德 Wi-Fi 是 30 米级、IP 推断是城市级）。
-        // 但要写**人话**：`amap:4` 是开发者黑话，使用者看不懂，看不懂就等于没写。
-        "天气数据由和风天气提供 · 定位：${locationSourceLabel(snapshot.locationSource)}",
-        color = Color(0xFF5A5A5A),
-        fontSize = 7.sp,
-        textAlign = TextAlign.Center,
-        modifier = Modifier.fillMaxWidth(),
-    )
+        // 署名与定位来源**放在滚动区里**，不做固定页脚：
+        // 固定页脚会一直占着一行高度，而手表屏幕的纵向预算本来就紧。
+        // 一行太长会折成两行还难看，所以**主动拆成两行**：先署名，定位另起一行。
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "天气数据由和风天气提供",
+            color = Color(0xFF5A5A5A),
+            fontSize = 7.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            // 定位来源要写出来：它决定这份预报的可信范围（高德 Wi-Fi 是 30 米级、IP 推断是城市级）。
+            // 但要写**人话**：amap:4 是开发者黑话，使用者看不懂，看不懂就等于没写。
+            "定位：" + locationSourceLabel(snapshot.locationSource),
+            color = Color(0xFF5A5A5A),
+            fontSize = 7.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 /**
