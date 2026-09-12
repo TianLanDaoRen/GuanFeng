@@ -67,7 +67,7 @@ class QweatherLoggerTest {
             precipType = "none", pressureHpa = 1016.47, visibilityM = 29980.0,
             dewPointC = 9.32, cloudCover = 0.17, uvIndex = 3,
         )
-        val row = QweatherLogger.formatNowRow(1789195000000L, 39.92, 116.41, now, 935L)
+        val row = QweatherLogger.formatNowRow(1789195000000L, 39.92, 116.41, now, 935L, "amap:5")
         assertEquals(
             "表头与数据行的列数必须相同，否则整列错位（且不会报错）",
             QweatherLogger.NOW_HEADER.split(",").size,
@@ -75,6 +75,7 @@ class QweatherLoggerTest {
         )
         assertTrue("气压必须落在行里", row.contains("1016.47"))
         assertTrue("坐标必须落盘：位置变了要能看出来", row.contains("39.9200"))
+        assertTrue("定位来源必须落盘：精度不同，参与校准的方式也不同", row.contains("amap:5"))
     }
 
     @Test
@@ -118,5 +119,16 @@ class QweatherLoggerTest {
         // 气压那一列应当为空，而不是 0.00——把"没数据"写成 0 会让统计把它当成真实读数
         val pressureIndex = QweatherLogger.HOURLY_HEADER.split(",").indexOf("pressure_hpa")
         assertEquals("", cells[pressureIndex])
+    }
+
+    @Test
+    fun `表头一致时不轮转_不一致时必须轮转`() {
+        // 一致：正常追加
+        assertEquals(false, QweatherLogger.needsRotation("a,b,c", "a,b,c"))
+        // 不一致：必须归档另起——就地改表头会让旧行被按新列名解读
+        assertEquals(true, QweatherLogger.needsRotation("a,b", "a,b,c"))
+        // 空/缺失：新文件，不需要轮转（本来就会写表头）
+        assertEquals(false, QweatherLogger.needsRotation(null, "a,b,c"))
+        assertEquals(false, QweatherLogger.needsRotation("", "a,b,c"))
     }
 }

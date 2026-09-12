@@ -117,7 +117,14 @@ object WeatherCollector {
                 context = context,
                 fileName = QweatherLogger.NOW_FILE,
                 header = QweatherLogger.NOW_HEADER,
-                row = QweatherLogger.formatNowRow(nowMs, fix.lat, fix.lon, now.data, now.elapsedMs),
+                row = QweatherLogger.formatNowRow(
+                    timestampMs = nowMs,
+                    lat = fix.lat,
+                    lon = fix.lon,
+                    now = now.data,
+                    httpMs = now.elapsedMs,
+                    locationSource = fix.source,
+                ),
             )
             if (wrote) nowRows = 1 else problems += "实时数据写盘失败"
         } else {

@@ -4,6 +4,10 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.LocationManager
+import com.amap.api.location.AMapLocationClient
+import com.amap.api.location.AMapLocationClientOption
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import android.util.Log
 import android.location.Location
 import android.location.LocationListener
@@ -135,6 +139,14 @@ object SiteLocation {
             return null
         }
 
+        // **第一顺位：高德融合定位**。它自己把 Wi-Fi、基站、GPS 揉在一起，
+        // 所以室内也能出结果——这正是系统那套在这台表上做不到的事
+        // （本机只有 passive 与 gps 两个 provider，没有 network provider）。
+        amapFix(context, gpsTimeoutMs)?.let {
+            remember(context, it)
+            return it
+        }
+
         val manager = runCatching {
             context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         }.getOrNull() ?: return null
@@ -202,6 +214,86 @@ object SiteLocation {
             // 连历史都没有（还没设置过就自己跑起来了）→ 问一次网络。
             // 拿到就会被记住，所以这条路径最多走一次。
             ?: networkFix(context)
+
+    /**
+     * 高德定位（一次）。
+     *
+     * ## 两个必须照做的细节
+     *
+     * 1. **隐私合规接口必须先调**。高德 SDK 自 2021 年起要求先声明隐私政策并取得同意，
+     *    否则**静默不定位**——不报错、不回调，只会一直等到超时。所以这个调用被绑在
+     *    我们自己的同意开关后面：用户没同意，我们连 SDK 都不初始化。
+     * 2. **客户端要在主线程构造**（官方要求）。这里是协程，所以显式切到 Main。
+     *
+     * ## 日志里为什么要打 locationType
+     *
+     * 它是判断"这次到底靠什么定位成功"的唯一依据：Wi-Fi 定位、基站定位、还是 GPS。
+     * 我们要验证的核心问题就是**室内能不能靠网络那两路拿到结果**——只看有没有坐标
+     * 分不出这一点，必须看类型。
+     */
+    private suspend fun amapFix(context: Context, timeoutMs: Long): Fix? = withTimeoutOrNull(timeoutMs) {
+        withContext(Dispatchers.Main) {
+            // 客户端必须在主线程构造（官方要求）。构造失败就直接放弃，别把 null 传下去。
+            val client = runCatching {
+                // 隐私合规：声明"已展示隐私政策、用户已同意"。少了这两句 SDK 静默不工作。
+                AMapLocationClient.updatePrivacyShow(context, true, true)
+                AMapLocationClient.updatePrivacyAgree(context, true)
+                AMapLocationClient(context.applicationContext)
+            }.getOrElse {
+                Log.w(TAG, "高德客户端构造失败：${it.javaClass.simpleName} ${it.message}")
+                null
+            }
+            if (client == null) return@withContext null
+
+            suspendCancellableCoroutine { continuation ->
+                fun finish(fix: Fix?) {
+                    runCatching { client.stopLocation() }
+                    runCatching { client.onDestroy() }
+                    if (continuation.isActive) continuation.resume(fix)
+                }
+
+                client.setLocationListener { location ->
+                    if (location != null && location.errorCode == 0) {
+                        Log.i(
+                            TAG,
+                            "高德成功：类型=${location.locationType} 精度=${location.accuracy}m " +
+                                "坐标=${location.latitude},${location.longitude}",
+                        )
+                        finish(
+                            Fix(
+                                lat = round(location.latitude),
+                                lon = round(location.longitude),
+                                source = "amap:${location.locationType}",
+                            ),
+                        )
+                    } else {
+                        Log.w(TAG, "高德失败：code=${location?.errorCode} ${location?.errorInfo}")
+                        finish(null)
+                    }
+                }
+                continuation.invokeOnCancellation {
+                    runCatching { client.stopLocation() }
+                    runCatching { client.onDestroy() }
+                }
+
+                client.setLocationOption(
+                    AMapLocationClientOption().apply {
+                        locationMode = AMapLocationClientOption.AMapLocationMode.Hight_Accuracy
+                        isOnceLocation = true
+                        isOnceLocationLatest = true
+                        // 只要坐标：地址解析交给和风那一次，免得两处对同一个点给出不同名字
+                        isNeedAddress = false
+                        isLocationCacheEnable = true
+                        httpTimeOut = timeoutMs
+                    },
+                )
+                runCatching { client.startLocation() }.onFailure {
+                    Log.w(TAG, "高德启动失败：${it.javaClass.simpleName} ${it.message}")
+                    finish(null)
+                }
+            }
+        }
+    }
 
     /** 请求一次定位更新，拿到第一个就撤监听。用老 API 是为了 minSdk 27 也走得通。 */
     private suspend fun singleUpdate(manager: LocationManager, provider: String): Location? =

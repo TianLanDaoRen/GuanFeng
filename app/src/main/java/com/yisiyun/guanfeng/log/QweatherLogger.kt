@@ -47,7 +47,7 @@ object QweatherLogger {
         "timestamp_ms,clock,lat,lon,condition_code,condition_text,temp_c,feels_like_c,humidity," +
             "wind_degree,wind_compass,wind_speed_ms,wind_scale,wind_gust_ms," +
             "precip_mm,precip_intensity_mmh,precip_type,pressure_hpa,visibility_m,dew_point_c," +
-            "cloud_cover,uv_index,http_ms"
+            "cloud_cover,uv_index,location_source,http_ms"
 
     const val HOURLY_HEADER =
         "fetched_ms,fetched_clock,forecast_time,lat,lon,condition_code,condition_text," +
@@ -69,12 +69,21 @@ object QweatherLogger {
 
     fun num(value: Int?): String = value?.toString() ?: ""
 
+    /**
+     * `locationSource` 记的是**这个坐标怎么来的**：`amap:5`（高德 Wi-Fi 定位）、
+     * `amap:1`（高德 GPS）、`network-ip:城市`（IP 推断）、`system:gps`（系统缓存）等。
+     *
+     * 为什么要单独一列：坐标本身看不出精度，而精度决定了这条数据该怎么参与校准。
+     * 30 米的 Wi-Fi 定位和城市级的 IP 推断如果混在一列里，事后没法区分，
+     * 也没法回答"IP 推断的坐标到底够不够用"这个问题——而那正是我们做这条链路的初衷。
+     */
     fun formatNowRow(
         timestampMs: Long,
         lat: Double,
         lon: Double,
         now: QweatherClient.Now,
         httpMs: Long,
+        locationSource: String = "",
     ): String = listOf(
         timestampMs.toString(),
         clockFormat.format(Date(timestampMs)),
@@ -98,6 +107,7 @@ object QweatherLogger {
         num(now.dewPointC),
         num(now.cloudCover, 3),
         num(now.uvIndex),
+        locationSource,
         httpMs.toString(),
     ).joinToString(",")
 
@@ -133,15 +143,45 @@ object QweatherLogger {
         num(hour.uvIndex),
     ).joinToString(",")
 
-    /** 追加一行；表头不存在时先写表头。返回是否成功。 */
+    /**
+     * 表头与本文件现有表头不一致时，**必须轮转另起一个文件**。
+     *
+     * 为什么不能就地改表头：旧行是按旧列写的，改了表头它们会被按新列名重新解读——
+     * 每个值都还在，只是意义全变了。**这是静默的数据损坏**，比崩溃危险得多：
+     * 崩溃你会知道，这个只有事后分析时才发现"数据怎么这么怪"。
+     *
+     * 真机上就撞到过：给实时表加了 location_source 之后，旧文件还是 23 列表头、
+     * 新行 24 列，用旧表头一读，http_ms 那一列显示的是 `amap:4`。
+     *
+     * 抽成纯函数是为了能写 JVM 单测——文件操作要 Context，判断逻辑不需要。
+     */
+    fun needsRotation(existingHeader: String?, expectedHeader: String): Boolean =
+        !existingHeader.isNullOrBlank() && existingHeader != expectedHeader
+
+    /** 追加一行；文件不存在则写表头，表头变了则把旧文件归档后另起。返回是否成功。 */
     fun append(context: Context, fileName: String, header: String, row: String): Boolean = runCatching {
-        val target = File(directory(context), fileName)
+        val target = rotateIfNeeded(context, fileName, header)
         if (!target.exists() || target.length() == 0L) {
             target.writeText(header + "\n")
         }
         target.appendText(row + "\n")
         true
     }.getOrDefault(false)
+
+    /** 表头变了就把旧文件改名留档，返回应当写入的目标文件。 */
+    private fun rotateIfNeeded(context: Context, fileName: String, header: String): File {
+        val target = File(directory(context), fileName)
+        val existing = if (target.exists() && target.length() > 0L) {
+            runCatching { target.bufferedReader().use { it.readLine() } }.getOrNull()
+        } else {
+            null
+        }
+        if (needsRotation(existing, header)) {
+            val archived = File(directory(context), "$fileName.${System.currentTimeMillis()}.old")
+            target.renameTo(archived)
+        }
+        return target
+    }
 
     /**
      * 批量追加（逐小时数据一次 24 行）。
@@ -150,7 +190,7 @@ object QweatherLogger {
     fun appendRows(context: Context, fileName: String, header: String, rows: List<String>): Boolean =
         runCatching {
             if (rows.isEmpty()) return true
-            val target = File(directory(context), fileName)
+            val target = rotateIfNeeded(context, fileName, header)
             val needsHeader = !target.exists() || target.length() == 0L
             target.appendText(buildString {
                 if (needsHeader) append(header).append('\n')

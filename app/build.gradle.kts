@@ -53,6 +53,11 @@ android {
 
 
         // 坐标**不设兜底值**：取不到就由设置流程明确问使用者，不替他猜（见 SiteLocation）。
+
+        // 高德的 Android key 只能写进 AndroidManifest（SDK 从 meta-data 读），
+        // 所以走占位符从 local.properties 注入——公开仓库里不留它。
+        // 这个 key 是绑定包名 + 签名 SHA1 的，即便被打包解出来，别人拿它也用不了。
+        manifestPlaceholders["amapKey"] = props.getProperty("amap.key").orEmpty()
     }
 
     /**
@@ -115,6 +120,8 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    // 高德定位：融合 Wi-Fi / 基站 / GPS，室内也能出结果（官方称支持室内定位的建筑里可达 2–3 米）
+    implementation(libs.amap.location)
     // 只有 JVM 单测（100 个），没有仪器测试。
     // 模板自带的 androidTest 桩与它的依赖（espresso / androidx.test.ext:junit /
     // compose ui-test）已删除——它们从未被任何 CI 跑过，却持续引来 Dependabot 的升级 PR。

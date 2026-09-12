@@ -23,6 +23,16 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <!--
+      前台服务要访问定位，必须声明 location 类型（Android 10+ 的规矩）。
+      没有它，服务里拿定位会被系统拒绝——而且**不会报错，只会一直拿不到结果**，
+      属于最难查的那类失败。
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
+    <!-- 高德定位 SDK 需要读 Wi-Fi 状态来参与融合定位 -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Android 13+ 才需要运行时申请；API 30 设备上为无害声明 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!--
@@ -54,6 +64,10 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.GuanFeng">
+        <!-- 高德 Android key：由 local.properties 注入，仓库里没有它 -->
+        <meta-data
+            android:name="com.amap.api.v2.apikey"
+            android:value="${amapKey}" />
 
         <!-- singleTask：官方要求，防 Monkey 验收堆出多个 MainActivity -->
         <activity
@@ -75,7 +89,7 @@
         <service
             android:name=".service.WatchSessionService"
             android:exported="false"
-            android:foregroundServiceType="health" />
+            android:foregroundServiceType="health|location" />
 
         <!--
           系统重启后把采集拉起来。此前应用里**没有任何入口**会启动这个服务
@@ -92,6 +106,11 @@
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
+            <!-- 高德定位 SDK 要求的独立定位服务 -->
+        <service
+            android:name="com.amap.api.location.APSService"
+            android:enabled="true"
+            android:exported="false" />
     </application>
 
 </manifest>
