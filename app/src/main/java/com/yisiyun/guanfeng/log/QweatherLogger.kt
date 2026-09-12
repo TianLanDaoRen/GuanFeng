@@ -257,6 +257,7 @@ object QweatherLogger {
     /** 天气页要显示的一条小时预报。只取界面用得到的几列。 */
     data class HourLine(
         val clock: String,
+        val conditionCode: String,
         val conditionText: String,
         val tempC: String,
         val precipProbability: String,
@@ -267,6 +268,7 @@ object QweatherLogger {
     data class Snapshot(
         val fetchedClock: String,
         val locationSource: String,
+        val conditionCode: String,
         val conditionText: String,
         val tempC: String,
         val feelsLikeC: String,
@@ -321,6 +323,7 @@ object QweatherLogger {
                     .map { row ->
                         HourLine(
                             clock = col(row, "forecast_time"),
+                            conditionCode = col(row, "condition_code"),
                             conditionText = col(row, "condition_text"),
                             tempC = col(row, "temp_c"),
                             precipProbability = col(row, "precip_probability"),
@@ -333,6 +336,7 @@ object QweatherLogger {
         Snapshot(
             fetchedClock = cell("clock"),
             locationSource = cell("location_source"),
+            conditionCode = cell("condition_code"),
             conditionText = cell("condition_text"),
             tempC = cell("temp_c"),
             feelsLikeC = cell("feels_like_c"),

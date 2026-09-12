@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yisiyun.guanfeng.log.QweatherLogger
 import com.yisiyun.guanfeng.ui.components.PageHeader
+import com.yisiyun.guanfeng.ui.components.WeatherIcon
 
 /**
  * 负一屏 · 天气预报。
@@ -89,6 +91,8 @@ private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
 ) {
     // 当前状况：一行大字，抬手就能看清
     Row(verticalAlignment = Alignment.CenterVertically) {
+        WeatherIcon(code = snapshot.conditionCode, tint = Color(0xFF9FD8EE), fontSize = 26.sp)
+        Spacer(Modifier.width(8.dp))
         Text(
             snapshot.conditionText.ifBlank { "—" },
             color = Color(0xFFE8E8E8),
@@ -164,6 +168,8 @@ private fun HourRow(hour: QweatherLogger.HourLine) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, color = Color(0xFF9A9A9A), fontSize = 9.sp, modifier = Modifier.weight(0.9f))
+        WeatherIcon(code = hour.conditionCode, tint = Color(0xFFB8D8E8), fontSize = 12.sp)
+        Spacer(Modifier.width(4.dp))
         Text(
             hour.conditionText.ifBlank { "—" },
             color = Color(0xFFD0D0D0),
