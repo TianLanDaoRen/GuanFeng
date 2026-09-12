@@ -57,9 +57,20 @@ object SiteLocation {
     fun hasRemembered(context: Context): Boolean =
         prefs(context).getString(KEY_LAT, null) != null
 
-    fun hasPermission(context: Context): Boolean =
-        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
-            PackageManager.PERMISSION_GRANTED
+    /** 粗定位：Wi-Fi/网络定位够用。 */
+    fun hasPermission(context: Context): Boolean = granted(context, Manifest.permission.ACCESS_COARSE_LOCATION)
+
+    /**
+     * 精定位：**GPS 只认这个权限**。
+     *
+     * 第一版只有 COARSE，结果 `requestLocationUpdates(GPS_PROVIDER, ...)` 抛 SecurityException，
+     * 而那句异常被 runCatching 吞掉、日志写成"超时（室内常见）"——把一个权限问题
+     * 误诊成了信号问题。所以这个判断必须单独存在，且失败原因必须打印出来。
+     */
+    fun hasFinePermission(context: Context): Boolean = granted(context, Manifest.permission.ACCESS_FINE_LOCATION)
+
+    private fun granted(context: Context, permission: String): Boolean =
+        ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
 
     /**
      * 解析当前坐标。**可能返回 null**，调用方必须处理（不要假装有坐标）。
@@ -99,34 +110,64 @@ object SiteLocation {
      * 而采集本身（每 30 分钟）只读已记录的坐标，不会再碰 GPS。
      * 室内锁不上星是真实存在的，所以**超时后必须给明确的失败出口**，不能卡死。
      */
-    suspend fun acquire(context: Context, timeoutMs: Long = 90_000L): Fix? {
+    suspend fun acquire(context: Context, budgetMs: Long = 90_000L): Fix? {
         // 先捡现成的：瞬时、零成本
         fromSystem(context)?.let {
             remember(context, it)
             return it
         }
-        if (!hasPermission(context)) return null
+        if (!hasPermission(context)) {
+            Log.w(TAG, "没有定位权限，无法定位")
+            return null
+        }
 
         val manager = runCatching {
             context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         }.getOrNull() ?: return null
 
-        // 实测本机只有 passive 与 gps 两个 provider，没有 network provider
-        for (provider in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
-            if (runCatching { manager.isProviderEnabled(provider) }.getOrDefault(false).not()) continue
-            val location = withTimeoutOrNull(timeoutMs) { singleUpdate(manager, provider) } ?: continue
-            val fix = Fix(
-                lat = round(location.latitude),
-                lon = round(location.longitude),
-                source = "acquired:$provider",
-            )
+        // **混合定位**：先走网络/Wi-Fi（室内也能用、通常几秒），再走 GPS（精确但要求见天）。
+        // 网络那一路只吃 COARSE 权限，所以用户即便只给了粗定位，这条仍然可用。
+        val networkBudget = minOf(budgetMs / 2, 12_000L)
+        val gpsBudget = budgetMs - networkBudget
+        val plan = listOf(
+            Triple(LocationManager.NETWORK_PROVIDER, networkBudget, hasPermission(context)),
+            Triple(LocationManager.GPS_PROVIDER, gpsBudget, hasFinePermission(context)),
+        )
+
+        for ((provider, timeout, permitted) in plan) {
+            if (!permitted) {
+                Log.i(TAG, "$provider 跳过：缺权限")
+                continue
+            }
+            if (!runCatching { manager.isProviderEnabled(provider) }.getOrDefault(false)) {
+                Log.i(TAG, "$provider 跳过：provider 未启用")
+                continue
+            }
+            val location = withTimeoutOrNull(timeout) { singleUpdate(manager, provider) }
+            if (location == null) {
+                Log.i(TAG, "$provider 未在 ${timeout}ms 内给出位置")
+                continue
+            }
+            val fix = Fix(round(location.latitude), round(location.longitude), "acquired:$provider")
             remember(context, fix)
             Log.i(TAG, "定位成功：$provider ${fix.lat},${fix.lon}")
             return fix
         }
-        Log.w(TAG, "主动定位超时或失败（室内常见）")
+        Log.w(TAG, "所有定位源都没给出位置")
         return null
     }
+
+    /**
+     * 采集周期里的**静默刷新**：试一次定位（默认 30 秒），失败就沿用历史坐标。
+     *
+     * 这是主人定的策略——每 30 分钟采数据时顺带更新一次位置，但不为此打断任何东西：
+     * 拿到新的就用新的，拿不到就继续用上次真取到过的那个，**绝不因此停止采集**。
+     * 与设置流程里那次"拿到才继续"是两回事：第一次必须确知在哪，之后只需保持新鲜。
+     */
+    suspend fun refreshOrRemember(context: Context, timeoutMs: Long = 30_000L): Fix? =
+        acquire(context, budgetMs = timeoutMs) ?: recalled(context)?.also {
+            Log.i(TAG, "静默刷新未成功，沿用历史坐标：${it.source}")
+        }
 
     /** 请求一次定位更新，拿到第一个就撤监听。用老 API 是为了 minSdk 27 也走得通。 */
     private suspend fun singleUpdate(manager: LocationManager, provider: String): Location? =
@@ -148,6 +189,9 @@ object SiteLocation {
                     provider, 0L, 0f, listener, Looper.getMainLooper(),
                 )
             }.onFailure {
+                // **必须打出来**。第一版把这里吞了，于是 SecurityException（缺 FINE 权限）
+                // 被我自己写成了"超时（室内常见）"，白白绕了一大圈。
+                Log.w(TAG, "$provider 注册失败：${it.javaClass.simpleName} ${it.message}")
                 if (continuation.isActive) continuation.resume(null)
             }
         }

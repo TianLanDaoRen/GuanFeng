@@ -38,6 +38,9 @@ object WeatherCollector {
      */
     private const val RETRY_INTERVAL_MS = 5L * 60L * 1000L
 
+    /** 每个采集周期里静默刷新位置的预算（主人定 30 秒）。超时就沿用历史坐标。 */
+    private const val SILENT_REFRESH_MS = 30_000L
+
     private const val PREFS = "guanfeng_weather"
     private const val KEY_LAST_AT = "last_fetch_at"
     private const val KEY_LAST_NOTE = "last_fetch_note"
@@ -88,7 +91,10 @@ object WeatherCollector {
             )
         }
 
-        val fix = SiteLocation.resolve(context)
+        // 取坐标：**先静默刷新一次（30 秒），失败才回退到历史坐标**（主人定的策略）。
+        // 与设置流程里那次"拿到才继续"不同：第一次必须确知在哪，之后只需保持新鲜，
+        // 所以这里绝不因为刷新失败就放弃采集。
+        val fix = SiteLocation.refreshOrRemember(context, timeoutMs = SILENT_REFRESH_MS)
             ?: return finish(
                 context, nowMs,
                 Outcome(false, "取不到坐标（没有定位权限且无历史坐标）", 0, 0),

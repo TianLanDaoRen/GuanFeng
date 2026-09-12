@@ -32,10 +32,17 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!--
-      天气采集用的**粗定位**（约 1–3 公里）。只用 COARSE 不用 FINE 是有意的：
-      天气的空间尺度是公里级，粗定位绰绰有余，而在手表上少弹一次"精确位置"授权
-      对使用者是实打实的减负。代码只调 getLastKnownLocation，不主动触发定位。
+      天气采集的定位权限。
+
+      **FINE 是必须的，这不是贪心**：GPS_PROVIDER 只认 ACCESS_FINE_LOCATION，
+      只有 COARSE 时 requestLocationUpdates(gps, ...) 会直接抛 SecurityException。
+      第一版我为了"少弹一次授权"只申请了 COARSE，结果 GPS 根本调不起来——
+      而异常又被 runCatching 吞掉，日志写成"超时（室内常见）"，
+      把一个权限问题误诊成了信号问题。主人一眼看穿：没申请权限，调用个什么 GPS。
+
+      COARSE 一并保留：Wi-Fi/网络定位只需要它，是混合定位里更快的那条路。
     -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <application

@@ -92,7 +92,7 @@ fun GuanFengApp() {
 
     // 用户点「开启」的同一刻再要定位权限：先解释、后要权限，比一进应用就弹系统框清楚得多。
     val locationPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
+        ActivityResultContracts.RequestMultiplePermissions(),
     ) {
         // 给不给都往下走：没权限时 acquire 会立刻返回 null，落到失败界面让使用者看见原因，
         // 而不是停在一个转圈的哑巴界面上。
@@ -156,7 +156,14 @@ fun GuanFengApp() {
                 step = step,
                 onAllow = {
                     WeatherConsent.grant(context)
-                    locationPermission.launch(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                    // FINE + COARSE 一起要：GPS 必须 FINE，Wi-Fi/网络定位用 COARSE。
+                    // 用户如果只给了 COARSE，混合定位里的网络那一路仍然可用。
+                    locationPermission.launch(
+                        arrayOf(
+                            android.Manifest.permission.ACCESS_FINE_LOCATION,
+                            android.Manifest.permission.ACCESS_COARSE_LOCATION,
+                        ),
+                    )
                 },
                 onDecline = {
                     WeatherConsent.decline(context)
