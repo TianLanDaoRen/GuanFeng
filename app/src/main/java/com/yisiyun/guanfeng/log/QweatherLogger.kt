@@ -38,6 +38,7 @@ object QweatherLogger {
 
     const val NOW_FILE = "qweather_now.csv"
     const val HOURLY_FILE = "qweather_hourly.csv"
+    const val DAILY_FILE = "qweather_daily.csv"
 
     /**
      * 列的顺序两处（表头与格式化函数）必须一致，改名时一起改。
@@ -54,6 +55,10 @@ object QweatherLogger {
             "temp_c,feels_like_c,humidity,wind_degree,wind_compass,wind_speed_ms,wind_scale," +
             "wind_gust_ms,precip_mm,precip_intensity_mmh,precip_probability,precip_type," +
             "pressure_hpa,visibility_m,dew_point_c,cloud_cover,uv_index"
+
+    const val DAILY_HEADER =
+        "fetched_ms,fetched_clock,date_utc,lat,lon,condition_code,condition_text," +
+            "temp_max_c,temp_min_c,uv_index_max"
 
     private val clockFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
 
@@ -109,6 +114,24 @@ object QweatherLogger {
         num(now.uvIndex),
         locationSource,
         httpMs.toString(),
+    ).joinToString(",")
+
+    fun formatDayRow(
+        fetchedMs: Long,
+        lat: Double,
+        lon: Double,
+        day: QweatherClient.Day,
+    ): String = listOf(
+        fetchedMs.toString(),
+        clockFormat.format(Date(fetchedMs)),
+        day.date,
+        num(lat, 4),
+        num(lon, 4),
+        day.conditionCode,
+        day.conditionText,
+        num(day.maxC),
+        num(day.minC),
+        num(day.uvIndexMax),
     ).joinToString(",")
 
     fun formatHourRow(
@@ -263,6 +286,40 @@ object QweatherLogger {
         val precipProbability: String,
         val precipMm: String,
     )
+
+    /** 天气页横条上的一天。 */
+    data class DayLine(
+        val dateUtc: String,
+        val conditionCode: String,
+        val maxC: String,
+        val minC: String,
+    )
+
+    /**
+     * 读最近一组逐天预报（7 条）。
+     *
+     * 与逐小时同理：文件里每轮追加 7 行，必须按 fetched_ms 分组取最后一组，
+     * 否则横条上会出现同一日期的新旧两条。
+     */
+    fun readLatestDays(context: Context): List<DayLine> = runCatching {
+        val file = File(directory(context), DAILY_FILE)
+        if (!file.exists()) return emptyList()
+        val lines = readTailLines(file, 8 * 1024).filter { it.isNotBlank() }
+        val header = lines.firstOrNull { it.startsWith("fetched_ms") }?.split(",") ?: return emptyList()
+        val rows = lines.drop(1).map { it.split(",") }.filter { it.size == header.size }
+        if (rows.isEmpty()) return emptyList()
+        val fi = header.indexOf("fetched_ms")
+        val last = rows.last().getOrNull(fi).orEmpty()
+        fun col(row: List<String>, name: String) = row.getOrNull(header.indexOf(name)).orEmpty()
+        rows.filter { it.getOrNull(fi) == last }.map {
+            DayLine(
+                dateUtc = col(it, "date_utc"),
+                conditionCode = col(it, "condition_code"),
+                maxC = col(it, "temp_max_c"),
+                minC = col(it, "temp_min_c"),
+            )
+        }
+    }.getOrDefault(emptyList())
 
     /** 天气页要显示的一份快照：最近一次取数的实时状况 + 它当时给的逐小时预报。 */
     data class Snapshot(

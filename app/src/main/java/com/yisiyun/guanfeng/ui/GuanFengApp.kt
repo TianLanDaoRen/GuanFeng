@@ -82,9 +82,14 @@ fun GuanFengApp() {
     // 天气页显示的快照：只读已落盘的数据，不自己发请求（断网也能看）。
     // 一分钟刷新一次就够——数据本身 30 分钟才更新一轮。
     var snapshot by remember { mutableStateOf<QweatherLogger.Snapshot?>(null) }
+    var forecastDays by remember { mutableStateOf<List<QweatherLogger.DayLine>>(emptyList()) }
     LaunchedEffect(Unit) {
         while (true) {
-            snapshot = withContext(Dispatchers.IO) { QweatherLogger.readLatestSnapshot(context) }
+            val loaded = withContext(Dispatchers.IO) {
+                QweatherLogger.readLatestSnapshot(context) to QweatherLogger.readLatestDays(context)
+            }
+            snapshot = loaded.first
+            forecastDays = loaded.second
             delay(60_000)
         }
     }
@@ -187,6 +192,7 @@ fun GuanFengApp() {
                 // 第 0 页是**负一屏**：预报。默认不落在这里，见 DEFAULT_PAGE
                 0 -> ForecastPage(
                     snapshot = snapshot,
+                    days = forecastDays,
                     consentGranted = WeatherConsent.isGranted(context),
                     // 没同意也留一个入口，不耽误使用（主人要求）
                     onRequestConsent = { setupStep = WeatherSetupStep.Consent },

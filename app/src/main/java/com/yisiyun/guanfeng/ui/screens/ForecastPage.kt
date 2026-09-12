@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -51,6 +52,7 @@ import com.yisiyun.guanfeng.ui.components.WeatherIcon
 @Composable
 fun ForecastPage(
     snapshot: QweatherLogger.Snapshot?,
+    days: List<QweatherLogger.DayLine>,
     consentGranted: Boolean,
     onRequestConsent: () -> Unit,
 ) {
@@ -80,7 +82,7 @@ fun ForecastPage(
                 onButton = onRequestConsent,
             )
 
-            else -> SnapshotBody(snapshot)
+            else -> SnapshotBody(snapshot, days)
         }
     }
 }
@@ -88,6 +90,7 @@ fun ForecastPage(
 @Composable
 private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
     snapshot: QweatherLogger.Snapshot,
+    days: List<QweatherLogger.DayLine>,
 ) {
     // 当前状况：一行大字，抬手就能看清
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -131,6 +134,18 @@ private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
         lineHeight = 11.sp,
     )
 
+    if (days.isNotEmpty()) {
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(13.dp),
+        ) {
+            days.forEach { DayCell(it) }
+        }
+    }
+
     Spacer(Modifier.height(8.dp))
     Text("未来几小时", color = Color(0xFF6EE7A8), fontSize = 9.sp, fontWeight = FontWeight.Bold)
     Spacer(Modifier.height(4.dp))
@@ -153,6 +168,36 @@ private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth(),
     )
+}
+
+/**
+ * 横条上的一格：周几（今天标"今天"）+ 图标 + 低温/高温。
+ *
+ * 温度按主人说的**低在前**。日期来自 UTC 的 forecastStartTime，必须换算成本地再取周几——
+ * 直接用 UTC 会在跨日时把今天标成明天。
+ */
+@Composable
+private fun DayCell(day: QweatherLogger.DayLine) {
+    val localDate = runCatching {
+        java.time.OffsetDateTime.parse(day.dateUtc)
+            .atZoneSameInstant(java.time.ZoneId.systemDefault())
+            .toLocalDate()
+    }.getOrNull()
+    val today = java.time.LocalDate.now(java.time.ZoneId.systemDefault())
+    val label = when {
+        localDate == null -> "—"
+        localDate == today -> "今天"
+        else -> listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")[localDate.dayOfWeek.value - 1]
+    }
+    fun one(v: String) = v.toDoubleOrNull()?.let { String.format(java.util.Locale.US, "%.0f", it) } ?: "—"
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, color = if (localDate == today) Color(0xFF6EE7A8) else Color(0xFF9A9A9A), fontSize = 8.sp)
+        Spacer(Modifier.height(3.dp))
+        WeatherIcon(code = day.conditionCode, tint = Color(0xFFB8D8E8), fontSize = 15.sp)
+        Spacer(Modifier.height(3.dp))
+        Text("${one(day.minC)}°/${one(day.maxC)}°", color = Color(0xFFD0D0D0), fontSize = 8.sp)
+    }
 }
 
 @Composable

@@ -79,6 +79,22 @@ object QweatherClient {
         val uvIndex: Int?,
     )
 
+    /**
+     * 逐天预报的一条。
+     *
+     * 和风**免费档只给 7 天**：实测 `?days=15` / `?days=30` 都返回 400 invalid parameter，
+     * 默认就是 7 天（首条起点是本地今天 00:00，所以是"今天 + 未来 6 天"）。
+     * 想要更久得升级订阅——我们不需要：横条上"昨天"那段本来就不做（那是历史数据）。
+     */
+    data class Day(
+        val date: String,
+        val conditionCode: String,
+        val conditionText: String,
+        val maxC: Double?,
+        val minC: Double?,
+        val uvIndexMax: Int?,
+    )
+
     /** 逐小时预报的一条。24 条一组。 */
     data class Hour(
         val forecastTime: String,
@@ -159,6 +175,24 @@ object QweatherClient {
 
     suspend fun fetchNow(lat: Double, lon: Double): Fetch<Now> =
         fetch("weather/v1/current/$lat/$lon") { parseNow(JSONObject(it)) }
+
+    suspend fun fetchDaily(lat: Double, lon: Double): Fetch<List<Day>> =
+        fetch("weather/v1/daily/$lat/$lon") { json ->
+            val days = JSONObject(json).getJSONArray("days")
+            (0 until days.length()).map { index ->
+                val day = days.getJSONObject(index)
+                // 日期取 forecastStartTime（UTC），显示时再换成本地——与逐小时同一套口径
+                val daytime = day.optJSONObject("daytime")
+                Day(
+                    date = day.optString("forecastStartTime"),
+                    conditionCode = daytime?.optJSONObject("condition")?.optString("code").orEmpty(),
+                    conditionText = daytime?.optJSONObject("condition")?.optString("text").orEmpty(),
+                    maxC = optDouble(day, "temperatureMax"),
+                    minC = optDouble(day, "temperatureMin"),
+                    uvIndexMax = day.optIntOrNull("uvIndexMax"),
+                )
+            }
+        }
 
     suspend fun fetchHourly(lat: Double, lon: Double): Fetch<List<Hour>> =
         fetch("weather/v1/hourly/$lat/$lon") { json ->

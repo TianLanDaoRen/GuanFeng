@@ -146,9 +146,29 @@ object WeatherCollector {
             problems += "逐小时取数失败：${hourly.error}"
         }
 
+        // 逐天：7 条一组，供天气页的横条显示（周几 + 图标 + 高低）
+        var dayRows = 0
+        val daily = QweatherClient.fetchDaily(fix.lat, fix.lon)
+        if (daily.data != null) {
+            val rows = daily.data.map { QweatherLogger.formatDayRow(nowMs, fix.lat, fix.lon, it) }
+            if (QweatherLogger.appendRows(
+                    context = context,
+                    fileName = QweatherLogger.DAILY_FILE,
+                    header = QweatherLogger.DAILY_HEADER,
+                    rows = rows,
+                )
+            ) {
+                dayRows = rows.size
+            } else {
+                problems += "逐天数据写盘失败"
+            }
+        } else {
+            problems += "逐天取数失败：${daily.error}"
+        }
+
         val ok = nowRows > 0 || hourlyRows > 0
         val note = if (ok) {
-            "${fix.source} · 实时 ${nowRows} 行 · 逐小时 ${hourlyRows} 行" +
+            "${fix.source} · 实时 ${nowRows} 行 · 逐小时 ${hourlyRows} 行 · 逐天 ${dayRows} 行" +
                 problems.joinToString("；", prefix = if (problems.isEmpty()) "" else "；")
         } else {
             problems.joinToString("；")
