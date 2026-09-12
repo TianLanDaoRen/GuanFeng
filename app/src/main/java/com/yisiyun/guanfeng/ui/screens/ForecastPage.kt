@@ -105,9 +105,13 @@ private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
     // 第一版把横条放在滚动区外面，又让小时列表用 weight(1f) 撑剩余空间——
     // 固定内容一超高，列表就被压成 0 高度，于是"整页滑不动"。
     // 教训：在一个已经会溢出的页面上，不要让子块去"分剩余空间"，让它自然流动。
+    // **必须给它 weight(1f)**：否则内容一长，下面的署名与定位来源会被顶出屏幕——
+    // 真机上就是这样：卡片区一多，那行小字直接看不见了。
+    // 让滚动区吃掉"剩余空间"，固定行才永远在屏幕里。
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .weight(1f)
             .verticalScroll(rememberScrollState()),
     ) {
     // 当前状况：一行大字，抬手就能看清
