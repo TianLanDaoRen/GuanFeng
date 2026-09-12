@@ -55,10 +55,43 @@ android {
         // 坐标**不设兜底值**：取不到就由设置流程明确问使用者，不替他猜（见 SiteLocation）。
     }
 
+    /**
+     * release 签名：全部从 local.properties 读（密钥库路径、别名、两个口令）。
+     *
+     * 为什么不在仓库里写死：本仓库是公开的，而密钥库是**应用身份**——
+     * 泄露它等于任何人都能签出"看起来是你发的"更新包。
+     *
+     * 为什么四项缺一就不签：这样克隆仓库的人（没有密钥库）依然能 `assembleRelease`
+     * 得到一个未签名产物，不会因为签名配置缺失而构建失败。
+     */
+    signingConfigs {
+        create("release") {
+            val storePath = props.getProperty("guanfeng.storeFile")
+            val storePw = props.getProperty("guanfeng.storePassword")
+            val alias = props.getProperty("guanfeng.keyAlias")
+            val keyPw = props.getProperty("guanfeng.keyPassword")
+            // 注意要判空白而不是判 null：local.properties 里留空得到的是空串，
+            // 空串非 null，会被当成已配置→ 拿空口令去开密钥库 → 构建失败。
+            // （这不是假想，是第一次就踩到的。）
+            if (!storePath.isNullOrBlank() && !storePw.isNullOrBlank() &&
+                !alias.isNullOrBlank() && !keyPw.isNullOrBlank()
+            ) {
+                storeFile = rootProject.file(storePath)
+                storePassword = storePw
+                keyAlias = alias
+                keyPassword = keyPw
+            }
+        }
+    }
+
     buildTypes {
         release {
             optimization {
                 enable = false
+            }
+            // 只在四项齐备时才挂上签名配置
+            if (!props.getProperty("guanfeng.storePassword").isNullOrBlank()) {
+                signingConfig = signingConfigs.getByName("release")
             }
         }
     }

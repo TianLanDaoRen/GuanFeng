@@ -23,3 +23,7 @@ local.properties
 # 和风天气的 JWT 签名密钥——**绝不入库**（本仓库是公开的）
 /libs/qweather/jwt/
 *.pem
+
+# 签名密钥库——应用身份，绝不入库
+*.jks
+*.keystore
