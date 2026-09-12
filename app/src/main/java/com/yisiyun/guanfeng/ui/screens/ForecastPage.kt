@@ -187,8 +187,10 @@ private fun HourRow(hour: QweatherLogger.HourLine) {
         )
         Text(
             // 上游给两位小数（28.14），界面上一位就够——手表屏幕小，多一位只是噪声
+            // 单位要写出来：只有数字读者得靠上下文猜是温度还是降水概率，
+            // 而这一行里两样都有
             hour.tempC.toDoubleOrNull()
-                ?.let { String.format(java.util.Locale.US, "%.1f", it) }
+                ?.let { String.format(java.util.Locale.US, "%.1f℃", it) }
                 ?: "—",
             color = Color(0xFFE8E8E8),
             fontSize = 10.sp,
