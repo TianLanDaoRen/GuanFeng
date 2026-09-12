@@ -18,6 +18,7 @@
 ![Offline](https://img.shields.io/badge/core-100%25%20offline-8957E5?style=flat-square)
 ![Network](https://img.shields.io/badge/network-optional%2C%20opt--in-6E7681?style=flat-square)
 ![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-3B7DD8?style=flat-square)
+[![AI by 卦灵AI](https://img.shields.io/badge/AI%20by-%E5%8D%A6%E7%81%B5AI%20%C2%B7%20%E5%85%8D%E8%B4%B9-8B5CF6?style=flat-square)](https://gualing.top)
 
 </div>
 
@@ -88,6 +89,20 @@
 <sub>左：平台白名单拦掉了第三方本地通知，于是改成应用内确认卡 + 直接驱动马达　·　中：教你确认发什么、不发什么　·　右：报告里它自己区分出了"还没有不适打卡"，而不是把舒适当成症状</sub>
 
 </div>
+
+<br/>
+
+## AI 报告背后的基础设施：卦灵AI
+
+「生成 AI 报告」调用的不是某个大模型厂商的接口，而是 **[卦灵AI](https://gualing.top)** 的公共接口——
+本项目作者另一个项目在做的基础设施。
+
+> **卦灵AI 全功能完全免费**，[免费注册](https://gualing.top)即可使用。
+> 如果它对你的生活有帮助、你愿意让它继续跑下去，可以去
+> **[卦灵](https://gualing.top) 捐赠换取永久会员**。
+
+观风只用到它一个接口：纯文本 JSON 进、纯文本出。服务端做了限流（10 次 / 10 分钟 / IP），
+而这个应用本身只在用户显式点按钮时才发请求，**所以它永远不会成为那个服务的负担**。
 
 <br/>
 
