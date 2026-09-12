@@ -15,6 +15,12 @@
       所以只能自己调。
     -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!--
+      开机自启：**只用于「真正的系统重启」这一种情形**。
+      睡眠模式那种"停掉一切应用"等价于 force-stop，广播与 START_STICKY 都拉不回来，
+      只能靠用户手动点开一次——那条路本来就无解，见 BootReceiver 的注释。
+    -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
     <!-- Android 13+ 才需要运行时申请；API 30 设备上为无害声明 -->
@@ -56,6 +62,22 @@
             android:name=".service.WatchSessionService"
             android:exported="false"
             android:foregroundServiceType="health" />
+
+        <!--
+          系统重启后把采集拉起来。此前应用里**没有任何入口**会启动这个服务
+          （只有 MainActivity.onCreate 会调），所以重启一次就断到用户想起来点开为止。
+          exported 必须为 true 才收得到 BOOT_COMPLETED 这类受保护广播（Android 12+ 的硬要求）。
+        -->
+        <receiver
+            android:name=".service.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>
