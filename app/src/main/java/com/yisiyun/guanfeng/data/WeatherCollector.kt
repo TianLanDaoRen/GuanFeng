@@ -166,9 +166,28 @@ object WeatherCollector {
             problems += "逐天取数失败：${daily.error}"
         }
 
+        // 空气质量：一次一行
+        var airRows = 0
+        val air = QweatherClient.fetchAir(fix.lat, fix.lon)
+        if (air.data != null) {
+            if (QweatherLogger.append(
+                    context = context,
+                    fileName = QweatherLogger.AIR_FILE,
+                    header = QweatherLogger.AIR_HEADER,
+                    row = QweatherLogger.formatAirRow(nowMs, fix.lat, fix.lon, air.data),
+                )
+            ) {
+                airRows = 1
+            } else {
+                problems += "空气质量写盘失败"
+            }
+        } else {
+            problems += "空气质量取数失败：${air.error}"
+        }
+
         val ok = nowRows > 0 || hourlyRows > 0
         val note = if (ok) {
-            "${fix.source} · 实时 ${nowRows} 行 · 逐小时 ${hourlyRows} 行 · 逐天 ${dayRows} 行" +
+            "${fix.source} · 实时 ${nowRows} 行 · 逐小时 ${hourlyRows} 行 · 逐天 ${dayRows} 行 · 空气 ${airRows} 行" +
                 problems.joinToString("；", prefix = if (problems.isEmpty()) "" else "；")
         } else {
             problems.joinToString("；")

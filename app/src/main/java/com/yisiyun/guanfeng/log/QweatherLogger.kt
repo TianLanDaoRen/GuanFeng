@@ -39,6 +39,7 @@ object QweatherLogger {
     const val NOW_FILE = "qweather_now.csv"
     const val HOURLY_FILE = "qweather_hourly.csv"
     const val DAILY_FILE = "qweather_daily.csv"
+    const val AIR_FILE = "qweather_air.csv"
 
     /**
      * 列的顺序两处（表头与格式化函数）必须一致，改名时一起改。
@@ -59,6 +60,9 @@ object QweatherLogger {
     const val DAILY_HEADER =
         "fetched_ms,fetched_clock,date_utc,lat,lon,condition_code,condition_text," +
             "temp_max_c,temp_min_c,uv_index_max"
+
+    const val AIR_HEADER =
+        "fetched_ms,fetched_clock,lat,lon,aqi,category,primary_pollutant,pm25,pm10"
 
     private val clockFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
 
@@ -114,6 +118,23 @@ object QweatherLogger {
         num(now.uvIndex),
         locationSource,
         httpMs.toString(),
+    ).joinToString(",")
+
+    fun formatAirRow(
+        fetchedMs: Long,
+        lat: Double,
+        lon: Double,
+        air: QweatherClient.Air,
+    ): String = listOf(
+        fetchedMs.toString(),
+        clockFormat.format(Date(fetchedMs)),
+        num(lat, 4),
+        num(lon, 4),
+        air.aqi,
+        air.category,
+        air.primaryPollutant,
+        air.pm25,
+        air.pm10,
     ).joinToString(",")
 
     fun formatDayRow(
@@ -286,6 +307,30 @@ object QweatherLogger {
         val precipProbability: String,
         val precipMm: String,
     )
+
+    /** 最新的空气质量。 */
+    data class AirLine(
+        val fetchedClock: String,
+        val aqi: String,
+        val category: String,
+        val primaryPollutant: String,
+    )
+
+    fun readLatestAir(context: Context): AirLine? = runCatching {
+        val file = File(directory(context), AIR_FILE)
+        if (!file.exists()) return null
+        val lines = readTailLines(file, 4 * 1024).filter { it.isNotBlank() }
+        val header = lines.firstOrNull { it.startsWith("fetched_ms") }?.split(",") ?: return null
+        val row = lines.last().split(",")
+        if (row.size != header.size) return null
+        fun col(name: String) = row.getOrNull(header.indexOf(name)).orEmpty()
+        AirLine(
+            fetchedClock = col("fetched_clock"),
+            aqi = col("aqi"),
+            category = col("category"),
+            primaryPollutant = col("primary_pollutant"),
+        )
+    }.getOrNull()
 
     /** 天气页横条上的一天。 */
     data class DayLine(

@@ -83,13 +83,19 @@ fun GuanFengApp() {
     // 一分钟刷新一次就够——数据本身 30 分钟才更新一轮。
     var snapshot by remember { mutableStateOf<QweatherLogger.Snapshot?>(null) }
     var forecastDays by remember { mutableStateOf<List<QweatherLogger.DayLine>>(emptyList()) }
+    var airNow by remember { mutableStateOf<QweatherLogger.AirLine?>(null) }
     LaunchedEffect(Unit) {
         while (true) {
             val loaded = withContext(Dispatchers.IO) {
-                QweatherLogger.readLatestSnapshot(context) to QweatherLogger.readLatestDays(context)
+                Triple(
+                    QweatherLogger.readLatestSnapshot(context),
+                    QweatherLogger.readLatestDays(context),
+                    QweatherLogger.readLatestAir(context),
+                )
             }
             snapshot = loaded.first
             forecastDays = loaded.second
+            airNow = loaded.third
             delay(60_000)
         }
     }
@@ -193,6 +199,7 @@ fun GuanFengApp() {
                 0 -> ForecastPage(
                     snapshot = snapshot,
                     days = forecastDays,
+                    air = airNow,
                     consentGranted = WeatherConsent.isGranted(context),
                     // 没同意也留一个入口，不耽误使用（主人要求）
                     onRequestConsent = { setupStep = WeatherSetupStep.Consent },

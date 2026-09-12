@@ -86,6 +86,20 @@ object QweatherClient {
      * 默认就是 7 天（首条起点是本地今天 00:00，所以是"今天 + 未来 6 天"）。
      * 想要更久得升级订阅——我们不需要：横条上"昨天"那段本来就不做（那是历史数据）。
      */
+    /**
+     * 实时空气质量。
+     *
+     * 只取"中国大陆标准"那一套指数：和风同时返回多种（美标、QAQI 等），
+     * 全显示只会让人困惑——**我们要的是对使用者有意义的那个**。
+     */
+    data class Air(
+        val aqi: String,
+        val category: String,
+        val primaryPollutant: String,
+        val pm25: String,
+        val pm10: String,
+    )
+
     data class Day(
         val date: String,
         val conditionCode: String,
@@ -175,6 +189,36 @@ object QweatherClient {
 
     suspend fun fetchNow(lat: Double, lon: Double): Fetch<Now> =
         fetch("weather/v1/current/$lat/$lon") { parseNow(JSONObject(it)) }
+
+    suspend fun fetchAir(lat: Double, lon: Double): Fetch<Air> =
+        fetch("airquality/v1/current/$lat/$lon") { json ->
+            val root = JSONObject(json)
+            val indexes = root.optJSONArray("indexes")
+            // 优先取国标（code=cn-mee），没有就退回第一个
+            val picked = (0 until (indexes?.length() ?: 0))
+                .map { indexes!!.getJSONObject(it) }
+                .firstOrNull { it.optString("code").startsWith("cn") }
+                ?: indexes?.optJSONObject(0)
+            val pollutants = root.optJSONArray("pollutants")
+            fun concentration(code: String): String {
+                for (i in 0 until (pollutants?.length() ?: 0)) {
+                    val item = pollutants!!.getJSONObject(i)
+                    if (item.optString("code") == code) {
+                        return optDouble(item.optJSONObject("concentration") ?: JSONObject(), "value")
+                            ?.let { String.format(java.util.Locale.US, "%.0f", it) }
+                            .orEmpty()
+                    }
+                }
+                return ""
+            }
+            Air(
+                aqi = picked?.optString("aqiDisplay").orEmpty(),
+                category = picked?.optString("category").orEmpty(),
+                primaryPollutant = picked?.optJSONObject("primaryPollutant")?.optString("name").orEmpty(),
+                pm25 = concentration("pm2p5"),
+                pm10 = concentration("pm10"),
+            )
+        }
 
     suspend fun fetchDaily(lat: Double, lon: Double): Fetch<List<Day>> =
         fetch("weather/v1/daily/$lat/$lon") { json ->

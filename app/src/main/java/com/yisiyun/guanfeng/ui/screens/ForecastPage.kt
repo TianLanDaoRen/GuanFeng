@@ -53,6 +53,7 @@ import com.yisiyun.guanfeng.ui.components.WeatherIcon
 fun ForecastPage(
     snapshot: QweatherLogger.Snapshot?,
     days: List<QweatherLogger.DayLine>,
+    air: QweatherLogger.AirLine?,
     consentGranted: Boolean,
     onRequestConsent: () -> Unit,
 ) {
@@ -82,7 +83,7 @@ fun ForecastPage(
                 onButton = onRequestConsent,
             )
 
-            else -> SnapshotBody(snapshot, days)
+            else -> SnapshotBody(snapshot, days, air)
         }
     }
 }
@@ -91,6 +92,7 @@ fun ForecastPage(
 private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
     snapshot: QweatherLogger.Snapshot,
     days: List<QweatherLogger.DayLine>,
+    air: QweatherLogger.AirLine?,
 ) {
     // **整页只用一个竖向滚动容器**。
     // 第一版把横条放在滚动区外面，又让小时列表用 weight(1f) 撑剩余空间——
@@ -121,27 +123,6 @@ private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
             fontWeight = FontWeight.Bold,
         )
     }
-    Spacer(Modifier.height(3.dp))
-    Text(
-        buildString {
-            append("体感 ").append(
-                snapshot.feelsLikeC.toDoubleOrNull()
-                    ?.let { String.format(java.util.Locale.US, "%.1f", it) }
-                    ?: "—",
-            ).append("℃")
-            append("　湿度 ").append(
-                // 上游给的是 0–1 的小数，界面上换算成百分比更直观
-                snapshot.humidity.toDoubleOrNull()?.let { "${(it * 100).toInt()}%" } ?: "—",
-            )
-            append("　气压 ").append(snapshot.pressureHpa.ifBlank { "—" }).append(" hPa")
-            // 紫外线是这份数据里**唯一没法从别处推出来**的一项：温度湿度能从气压趋势猜个大概，
-            // 紫外线只取决于太阳高度与云量，而这两样我们都不测。存了就该显示。
-            append("　紫外线 ").append(snapshot.uvIndex.ifBlank { "—" })
-        },
-        color = Color(0xFF8A8A8A),
-        fontSize = 8.sp,
-        lineHeight = 11.sp,
-    )
 
     if (days.isNotEmpty()) {
         Spacer(Modifier.height(8.dp))
@@ -162,6 +143,70 @@ private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         snapshot.hours.forEach { hour -> HourRow(hour) }
     }
+
+    // ── 卡片区：把"读数"从标题下那行挤成一团的字里解放出来 ──────────────
+    // 原来四五个字段塞一行还要折行，手表上读起来很吃力；做成卡片之后
+    // 每项有自己的位置，**新数据（空气质量、以后的预警）也有地方放**。
+    Spacer(Modifier.height(10.dp))
+    Text("此刻", color = Color(0xFF6EE7A8), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+    Spacer(Modifier.height(5.dp))
+
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+        MetricCard(
+            label = "体感",
+            value = snapshot.feelsLikeC.toDoubleOrNull()
+                ?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "—",
+            unit = "℃",
+            valueColor = Color(0xFFF2C14E),
+            modifier = Modifier.weight(1f),
+        )
+        MetricCard(
+            label = "湿度",
+            value = snapshot.humidity.toDoubleOrNull()?.let { "${(it * 100).toInt()}" } ?: "—",
+            unit = "%",
+            valueColor = Color(0xFF7FD1E8),
+            modifier = Modifier.weight(1f),
+        )
+    }
+    Spacer(Modifier.height(6.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+        MetricCard(
+            label = "气压",
+            value = snapshot.pressureHpa.ifBlank { "—" },
+            unit = "hPa",
+            valueColor = Color(0xFFB79CE8),
+            modifier = Modifier.weight(1f),
+        )
+        MetricCard(
+            // 紫外线值得单独一格：它是整份数据里**唯一没法从别处推出来**的一项
+            label = "紫外线",
+            value = snapshot.uvIndex.ifBlank { "—" },
+            unit = "",
+            valueColor = Color(0xFFE8C36A),
+            modifier = Modifier.weight(1f),
+        )
+    }
+
+    if (air != null && air.aqi.isNotBlank()) {
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+            MetricCard(
+                label = "空气 ${air.category}",
+                value = air.aqi,
+                unit = "AQI",
+                valueColor = aqiColor(air.aqi),
+                modifier = Modifier.weight(1f),
+            )
+            MetricCard(
+                label = "首要污染物",
+                value = air.primaryPollutant.ifBlank { "—" },
+                unit = "",
+                valueColor = Color(0xFFB8B8B8),
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+
 
     Spacer(Modifier.height(10.dp))
     } // 竖向滚动容器到此结束
@@ -280,4 +325,48 @@ private fun androidx.compose.foundation.layout.ColumnScope.EmptyState(
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth(),
     )
+}
+
+/**
+ * 读数卡片。
+ *
+ * 数值用大字号、单位用小字号——手表屏幕上"一眼看到数"比"完整写出来"重要，
+ * 单位跟着数字反而会把数字挤小。
+ */
+@Composable
+private fun MetricCard(
+    label: String,
+    value: String,
+    unit: String,
+    valueColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .background(Color(0xFF161616), RoundedCornerShape(8.dp))
+            .padding(horizontal = 7.dp, vertical = 6.dp),
+    ) {
+        Text(label, color = Color(0xFF7A7A7A), fontSize = 7.sp)
+        Spacer(Modifier.height(2.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(value, color = valueColor, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            if (unit.isNotBlank()) {
+                Spacer(Modifier.width(2.dp))
+                Text(unit, color = Color(0xFF7A7A7A), fontSize = 7.sp)
+            }
+        }
+    }
+}
+
+/**
+ * AQI 配色按国标的分档来（优/良/轻度/中度/重度/严重），而不是自己发挥。
+ * 这个颜色用户在其他地方见过，复用它的语义比自创配色更省解释。
+ */
+private fun aqiColor(aqi: String): Color = when (aqi.toIntOrNull() ?: -1) {
+    in 0..50 -> Color(0xFF6EE7A8)
+    in 51..100 -> Color(0xFFE8D96A)
+    in 101..150 -> Color(0xFFF2A24E)
+    in 151..200 -> Color(0xFFE2574C)
+    in 201..300 -> Color(0xFFB04ED8)
+    else -> Color(0xFF9A5A5A)
 }
