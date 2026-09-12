@@ -274,6 +274,7 @@ object QweatherLogger {
         val feelsLikeC: String,
         val pressureHpa: String,
         val humidity: String,
+        val uvIndex: String,
         val hours: List<HourLine>,
     )
 
@@ -342,6 +343,7 @@ object QweatherLogger {
             feelsLikeC = cell("feels_like_c"),
             pressureHpa = cell("pressure_hpa"),
             humidity = cell("humidity"),
+            uvIndex = cell("uv_index"),
             hours = hours,
         )
     }.getOrNull()

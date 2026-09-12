@@ -122,6 +122,9 @@ private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
                 snapshot.humidity.toDoubleOrNull()?.let { "${(it * 100).toInt()}%" } ?: "—",
             )
             append("　气压 ").append(snapshot.pressureHpa.ifBlank { "—" }).append(" hPa")
+            // 紫外线是这份数据里**唯一没法从别处推出来**的一项：温度湿度能从气压趋势猜个大概，
+            // 紫外线只取决于太阳高度与云量，而这两样我们都不测。存了就该显示。
+            append("　紫外线 ").append(snapshot.uvIndex.ifBlank { "—" })
         },
         color = Color(0xFF8A8A8A),
         fontSize = 8.sp,
