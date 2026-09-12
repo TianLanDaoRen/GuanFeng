@@ -139,6 +139,28 @@ object PressureRecorder {
     /** 跨会话状态的落盘节奏（不必每条样本都写盘）。 */
     private const val PERSIST_INTERVAL_MS = 5L * 60L * 1000L
 
+    /**
+     * 核心传感器的请求周期：5 Hz。
+     *
+     * 气压必须连续采（5 秒聚合节奏就是它撑起来的），竖直运动证据同理——
+     * 一趟 45 秒的电梯只有约 9 个 5 秒样本，再降就分辨不出来了。
+     */
+    private const val CORE_SAMPLING_US = 200_000
+
+    /**
+     * 光照的请求周期：5 秒一次。
+     *
+     * 10 分钟趋势只需要首尾两点，5 Hz 是 250 倍过采样。
+     * 注意真机上该传感器 minRate = 0.60 Hz，HAL 会把这里钳到 0.6 Hz。
+     */
+    private const val LIGHT_SAMPLING_US = 5_000_000
+
+    /** 体感传感器（心率/腕温）的脉冲窗口长度。20 秒足够 PPG 锁定并给出十几次读数。 */
+    private const val PULSE_ON_MS = 20_000L
+
+    /** 体感传感器的脉冲间隔。10 分钟一次：腕温是分钟级慢变量，静息基线也只取低分位数。 */
+    private const val PULSE_INTERVAL_MS = 10L * 60L * 1000L
+
     /** 恢复历史时：超过这个间隔视为断档，断档之前的数据一律不接（跨空洞拟合会造出假趋势）。 */
     private const val MAX_GAP_MS = 5L * 60L * 1000L
 
@@ -159,6 +181,10 @@ object PressureRecorder {
     private var scope: CoroutineScope? = null
     private var liveJob: Job? = null
     private var sampleJob: Job? = null
+    /** 体感传感器的脉冲调度协程（见 PULSE_INTERVAL_MS 的说明）。 */
+    private var pulseJob: Job? = null
+    /** 需要脉冲式开关的传感器（心率、腕温）。 */
+    private var pulseSensors: List<Sensor> = emptyList()
     private var sensorManager: SensorManager? = null
     private var logger: CsvSessionLogger? = null
     /** 供采样子循环写回跨会话状态用（sampleLoop 里拿不到 start() 的局部变量）。 */
@@ -318,6 +344,10 @@ object PressureRecorder {
     @Synchronized
     fun stop() {
         if (!started) return
+        // 脉冲窗口可能正好开着：先显式注销，否则 PPG 会一直亮到进程被杀
+        sensorManager?.let { unregisterPulse(it) }
+        pulseJob?.cancel()
+        pulseJob = null
         liveJob?.cancel()
         sampleJob?.cancel()
         scope = null
@@ -401,9 +431,83 @@ object PressureRecorder {
     }
 
     private fun registerSensors(manager: SensorManager) {
-        val listener = object : SensorEventListener {
-            override fun onSensorChanged(event: SensorEvent) {
-                when (event.sensor.type) {
+        val listener = sensorListener
+
+        // 【分两类注册，这是省电的核心】
+        //
+        // 第一类「核心」：气压 + 竖直运动证据。它们必须连续采样才能工作，
+        // 请求速率维持 5 Hz 不动（主人的判断正确）。
+        val core = listOf(
+            Sensor.TYPE_PRESSURE to CORE_SAMPLING_US,
+            Sensor.TYPE_GRAVITY to CORE_SAMPLING_US,
+            Sensor.TYPE_LINEAR_ACCELERATION to CORE_SAMPLING_US,
+            Sensor.TYPE_STEP_DETECTOR to CORE_SAMPLING_US,
+            // 光照单独给慢速率：10 分钟趋势用不上 5 Hz。
+            // 但**别指望它省电**——真机上该传感器的 active-count = 2，
+            // 系统自己的自动亮度也挂在上面（500 ms），物理器件本来就亮着，
+            // 我们降速只减少自己的事件投递。
+            Sensor.TYPE_LIGHT to LIGHT_SAMPLING_US,
+        )
+        var registered = 0
+        core.forEach { (type, periodUs) ->
+            val sensor = runCatching { manager.getDefaultSensor(type) }.getOrNull()
+            if (sensor == null) {
+                Log.w(TAG, "拿不到传感器 type=$type")
+                return@forEach
+            }
+            val ok = runCatching {
+                manager.registerListener(listener, sensor, periodUs)
+            }.getOrElse { error ->
+                Log.w(TAG, "注册 type=$type 抛异常: $error")
+                false
+            }
+            if (ok) registered++ else Log.w(TAG, "注册 type=$type 失败")
+        }
+        Log.i(TAG, "已注册 $registered/${core.size} 个核心传感器")
+
+        // 第二类「体感」：心率与腕温 —— 改成脉冲式，默认关着，每 PULSE_INTERVAL_MS 开 PULSE_ON_MS。
+        //
+        // 为什么必须这样，而不是"把回调速率调低"：
+        // 真机 `dumpsys sensorservice` 显示 HEART_RATE 的 maxRate 就是 1.00 Hz，
+        // 我们请求 5 Hz 也被硬件钳到 1 Hz —— **降速率一点用都没有**。
+        // 而它的 active-count = 1：全表只有我们一个客户端，
+        // 也就是说这个应用的报错是"手表的 PPG 光电传感器 7×24 亮着"。
+        // PPG 是手表上最贵的传感器（LED 驱动电流），
+        // 主人说"耗电跟睡眠监测差不多"正是因为睡眠监测也在常开 PPG。
+        // 唯一有效的动作是**停止注册**，让它真正断电。
+        pulseSensors = listOf(Sensor.TYPE_HEART_RATE, TYPE_WRIST_TEMPERATURE)
+            .mapNotNull { type -> runCatching { manager.getDefaultSensor(type) }.getOrNull() }
+        pulseJob = scope?.launch {
+            while (true) {
+                registerPulse(manager)
+                delay(PULSE_ON_MS)
+                unregisterPulse(manager)
+                delay(PULSE_INTERVAL_MS - PULSE_ON_MS)
+            }
+        }
+        Log.i(TAG, "体感传感器改为脉冲采样：每 ${PULSE_INTERVAL_MS / 1000} 秒开 ${PULSE_ON_MS / 1000} 秒")
+    }
+
+    /** 打开心率/腕温的采样窗口。 */
+    private fun registerPulse(manager: SensorManager) {
+        pulseSensors.forEach { sensor ->
+            runCatching { manager.registerListener(sensorListener, sensor, CORE_SAMPLING_US) }
+                .onFailure { Log.w(TAG, "脉冲注册 type=${sensor.type} 失败: $it") }
+        }
+        Log.i(TAG, "体感采样窗口开启")
+    }
+
+    /** 关闭窗口——这一步才是省电发生的地方。 */
+    private fun unregisterPulse(manager: SensorManager) {
+        pulseSensors.forEach { sensor ->
+            runCatching { manager.unregisterListener(sensorListener, sensor) }
+        }
+        Log.i(TAG, "体感采样窗口关闭")
+    }
+
+    private val sensorListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            when (event.sensor.type) {
                     Sensor.TYPE_PRESSURE -> {
                         latestPressure = event.values[0]
                         aggregator.addPressure(event.values[0])
@@ -444,33 +548,6 @@ object PressureRecorder {
 
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
         }
-
-        val wanted = listOf(
-            Sensor.TYPE_PRESSURE,
-            Sensor.TYPE_LIGHT,
-            Sensor.TYPE_HEART_RATE,
-            TYPE_WRIST_TEMPERATURE,
-            Sensor.TYPE_GRAVITY,
-            Sensor.TYPE_LINEAR_ACCELERATION,
-            Sensor.TYPE_STEP_DETECTOR,
-        )
-        var registered = 0
-        wanted.forEach { type ->
-            val sensor = runCatching { manager.getDefaultSensor(type) }.getOrNull()
-            if (sensor == null) {
-                Log.w(TAG, "拿不到传感器 type=$type")
-                return@forEach
-            }
-            val ok = runCatching {
-                manager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
-            }.getOrElse { error ->
-                Log.w(TAG, "注册 type=$type 抛异常: $error")
-                false
-            }
-            if (ok) registered++ else Log.w(TAG, "注册 type=$type 失败")
-        }
-        Log.i(TAG, "已注册 $registered/${wanted.size} 个传感器")
-    }
 
     private var stepPulses = 0
 

@@ -49,6 +49,14 @@ class MainActivity : ComponentActivity() {
         WatchSessionService.start(this)
 
         val bodySensorsGranted = hasPermission(Manifest.permission.BODY_SENSORS)
+        // 【曾经的静默失败】ACTIVITY_RECOGNITION 只在清单里声明过，**从没在运行时申请**。
+        // 后果不是崩溃，而是计步传感器注册被 SensorService 直接拒绝：
+        //   `Tried enabling a sensor (Step_detector) without holding android.permission.ACTIVITY_RECOGNITION`
+        // 而采集器只是记一行日志继续跑，于是 CSV 里的 steps 列长期全是 0——
+        // 一个"看起来在记录、其实一直是空"的字段，比缺列更危险。
+        // 2026-09-11 装新构建时在真机 logcat 里抓到。
+        val activityRecognitionGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            hasPermission(Manifest.permission.ACTIVITY_RECOGNITION)
         val notificationsGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             hasPermission(Manifest.permission.POST_NOTIFICATIONS)
 
@@ -57,6 +65,9 @@ class MainActivity : ComponentActivity() {
                 val bodyLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission()
                 ) { ok -> Log.i(TAG, "BODY_SENSORS 授权结果 = $ok") }
+                val activityLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission()
+                ) { ok -> Log.i(TAG, "ACTIVITY_RECOGNITION 授权结果 = $ok") }
                 val notificationLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission()
                 ) { ok -> Log.i(TAG, "POST_NOTIFICATIONS 授权结果 = $ok") }
@@ -65,6 +76,10 @@ class MainActivity : ComponentActivity() {
                     if (!bodySensorsGranted) {
                         Log.i(TAG, "申请 BODY_SENSORS…")
                         bodyLauncher.launch(Manifest.permission.BODY_SENSORS)
+                    }
+                    if (!activityRecognitionGranted) {
+                        Log.i(TAG, "申请 ACTIVITY_RECOGNITION…")
+                        activityLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
                     }
                     if (!notificationsGranted) {
                         Log.i(TAG, "申请 POST_NOTIFICATIONS…")
