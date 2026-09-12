@@ -222,8 +222,9 @@ private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
 
     Spacer(Modifier.height(6.dp))
     Text(
-        // 定位来源要写出来：它决定这份预报的可信范围（Wi-Fi 是 30 米级、IP 是城市级）
-        "天气数据由和风天气提供 · 位置 ${snapshot.locationSource.ifBlank { "未知" }}",
+        // 定位来源要写出来：它决定这份预报的可信范围（高德 Wi-Fi 是 30 米级、IP 推断是城市级）。
+        // 但要写**人话**：`amap:4` 是开发者黑话，使用者看不懂，看不懂就等于没写。
+        "天气数据由和风天气提供 · 定位：${locationSourceLabel(snapshot.locationSource)}",
         color = Color(0xFF5A5A5A),
         fontSize = 7.sp,
         textAlign = TextAlign.Center,
@@ -380,4 +381,28 @@ private fun aqiColor(aqi: String): Color = when (aqi.toIntOrNull() ?: -1) {
     in 151..200 -> Color(0xFFE2574C)
     in 201..300 -> Color(0xFFB04ED8)
     else -> Color(0xFF9A5A5A)
+}
+
+/**
+ * 把落盘用的定位来源代号翻成人话。
+ *
+ * 代号是给 CSV 用的（要紧凑、要能 grep），界面是给人看的——**两者必须分开**：
+ * `amap:4` 这种字符串写在手表上，使用者只会觉得莫名其妙，等于没说。
+ *
+ * 括号里的半句是**为什么它重要**：同一个"位置"可能是 30 米的 Wi-Fi 定位，
+ * 也可能是几十公里外的网络推断。天气页面既然把位置当依据，就该让人知道依据有多硬。
+ */
+private fun locationSourceLabel(source: String): String = when {
+    source.isBlank() -> "未知"
+    source.startsWith("amap:5") -> "高德 Wi-Fi（约 30 米）"
+    source.startsWith("amap:1") -> "高德卫星"
+    source.startsWith("amap:4") -> "高德缓存"
+    source.startsWith("amap:8") -> "高德离线"
+    source.startsWith("amap:") -> "高德"
+    source.startsWith("network-ip") -> {
+        val city = source.substringAfter(':', "").takeIf { it.isNotBlank() && it != "?" }
+        if (city == null) "网络推断（城市级）" else "网络推断 · $city（城市级）"
+    }
+    source.startsWith("system:") -> "系统卫星"
+    else -> source
 }

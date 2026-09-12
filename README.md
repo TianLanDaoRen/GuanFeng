@@ -252,7 +252,6 @@ JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
 | [`docs/screenshots/`](docs/screenshots/) | 界面截图（`07-qweather.webp` = 负一屏天气预报） |
 | [`docs/assets/`](docs/assets/) | 图标（SVG 源 + PNG） |
 
-> 但内容实际是 **WebP**（VP8，378×496）——它是归档时以 PNG 之名存下来的。
 > GitHub 与浏览器按内容识别，通常仍能正常显示；但文件名与格式不符会咬到那些
 > **按后缀判断类型**的工具与脚本。修法：改名为 `.webp` 并同步本 README 的引用。
 
