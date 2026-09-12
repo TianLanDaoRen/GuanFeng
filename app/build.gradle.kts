@@ -16,6 +16,8 @@ android {
         versionCode = 1
         versionName = "1.0"
 
+        // 仪器测试已移除（见 dependencies 段的说明）。这一行留着是**有意的**：
+        // 将来若重新加仪器测试，除它之外还需要那四条 androidTestImplementation。
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -44,11 +46,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    // 只有 JVM 单测（100 个），没有仪器测试。
+    // 模板自带的 androidTest 桩与它的依赖（espresso / androidx.test.ext:junit /
+    // compose ui-test）已删除——它们从未被任何 CI 跑过，却持续引来 Dependabot 的升级 PR。
     testImplementation(libs.junit)
-    androidTestImplementation(platform(libs.androidx.compose.bom))
-    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
-    androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation(libs.androidx.junit)
-    debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
