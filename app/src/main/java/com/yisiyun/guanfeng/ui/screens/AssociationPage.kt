@@ -56,7 +56,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** 关联视图的观察周期。 */
+/** 「气压 × 体感」页的观察周期。 */
 private const val PERIOD_DAYS = 7
 
 /**
@@ -73,7 +73,7 @@ private const val MIN_DAYS_FOR_REPORT = 1
 private const val SUGGESTED_DAYS_FOR_REPORT = 7
 
 /**
- * 关联页缓存：一次汇总要扫约 12 万行原始样本，每次翻页都重算会卡。
+ * 「气压 × 体感」页缓存：一次汇总要扫约 12 万行原始样本，每次翻页都重算会卡。
  * 但打卡是用户的实时动作——所以缓存带版本号，打卡后立刻失效重算。
  */
 private object AssociationCache {
@@ -92,10 +92,10 @@ private object AssociationCache {
 private const val DAY_MS = 24L * 60L * 60L * 1000L
 
 /**
- * 第四屏 · 关联：把打卡点叠到气压曲线上，并提供 AI 报告入口。
+ * 第四屏 · 气压 × 体感：把体感打卡点叠到气压曲线上，并提供 AI 报告入口。
  *
  * 这一屏有两个职责：
- *   1. 把「气压 × 不适」摆在眼前——曲线由小时均值构成，打卡点按当时的实际气压落位；
+ *   1. 把「气压 × 体感」摆在眼前——曲线由小时均值构成，打卡点按当时的实际气压落位；
  *   2. 在数据够用时，让用户**主动决定**要不要把这份聚合统计发出去做一次 AI 解读。
  *
  * 关于"该不该让手表自己调 LLM"：核心功能（趋势、解耦、打卡）全部离线，
@@ -229,10 +229,22 @@ fun AssociationPage(state: RecorderState) {
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
+            // 标题原为「关联」——名字是我起的，它说明不了这一页在干什么。
+            // 这一页真正做的事是：把体感打卡的点叠到气压曲线上，看两者有没有关系。
+            // 写成「气压 × 体感」，与第二屏的「环境 × 身体」用同一种句式。
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("关联", color = Color(0xFFB79CE8), fontSize = 11.sp)
-                Spacer(Modifier.fillMaxWidth(0.1f))
-                Text("曲线近 24 小时 · 统计近 $PERIOD_DAYS 天", color = Color(0xFF6E6E6E), fontSize = 7.sp)
+                Text("气压 × 体感", color = Color(0xFFB79CE8), fontSize = 11.sp, maxLines = 1)
+                Spacer(Modifier.width(6.dp))
+                // 副标题吃剩余宽度、贴右：标题永远不可能被挤出去。
+                // 这一页已经因为算错横向预算把「生成 AI 报告」顶出过屏幕一次，不再靠手算字数。
+                Text(
+                    text = "曲线 24h · 统计近 $PERIOD_DAYS 天",
+                    color = Color(0xFF6E6E6E),
+                    fontSize = 7.sp,
+                    maxLines = 1,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f),
+                )
             }
 
             if (loading || current == null) {
@@ -268,7 +280,7 @@ fun AssociationPage(state: RecorderState) {
                     // 一行一件事。原先三件事挤在一行里（打卡数 · 大变化日 · 落在其上的打卡），
                     // 既读不清哪个数字对应什么，也容易被当成一个整体去理解——主人提得对。
                     Text(
-                        text = "不适打卡 ${current.checkInCount} 次",
+                        text = "体感打卡 ${current.checkInCount} 次",
                         color = Color(0xFFD0D0D0),
                         fontSize = 9.sp,
                     )
@@ -280,7 +292,7 @@ fun AssociationPage(state: RecorderState) {
                     val overlap = current.overlapRatio
                     Text(
                         text = if (overlap == null) {
-                            "还没有打卡记录"
+                            "还没有体感打卡记录"
                         } else {
                             "其中落在变化日 ${current.checkInsOnBigSwingDays} 次（%.0f%%）"
                                 .format(overlap * 100)
@@ -289,7 +301,7 @@ fun AssociationPage(state: RecorderState) {
                         fontSize = 9.sp,
                     )
                     Text(
-                        text = "青线＝气压（已去高度） · 黄点＝打卡",
+                        text = "青线＝气压（已去高度） · 黄点＝体感打卡",
                         color = Color(0xFF5E6A72),
                         fontSize = 7.sp,
                     )
@@ -324,7 +336,7 @@ fun AssociationPage(state: RecorderState) {
                     )
                 } else {
                     Text(
-                        text = "数据不足：需至少 1 天气压记录与 1 次打卡（当前 ${current.daysWithData} 天 / " +
+                        text = "数据不足：需至少 1 天气压记录与 1 次体感打卡（当前 ${current.daysWithData} 天 / " +
                             "${current.checkInCount} 次）",
                         color = Color(0xFF8A8A8A),
                         fontSize = 8.sp,
@@ -378,7 +390,7 @@ private fun ConsentOverlay(onCancel: () -> Unit, onConfirm: () -> Unit) {
             Text(
                 text = "将上传：" + "\n" +
                     "· 气压与体感的小时级统计" + "\n" +
-                    "· 你的打卡记录（含手写备注原文）与天气实况" + "\n\n" +
+                    "· 你的体感打卡记录（含手写备注原文）与天气实况" + "\n\n" +
                     "不会上传：" + "\n" +
                     "设备标识、账号身份、体征逐点读数。",
                 color = Color(0xFFC8C8C8),

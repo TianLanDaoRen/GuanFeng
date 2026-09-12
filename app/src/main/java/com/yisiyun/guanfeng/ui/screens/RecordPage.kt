@@ -41,7 +41,7 @@ import androidx.compose.foundation.background
 import com.yisiyun.guanfeng.log.WeatherObservationLogger
 
 /**
- * 第四屏 · 记录：这一屏存在的意义是让「它到底有没有在记」一眼可见、可以自己验证。
+ * 第五屏 · 记录：这一屏存在的意义是让「它到底有没有在记」一眼可见、可以自己验证。
  *
  * 它同时承担「诊断页」的职责——主屏放不下的完整依据（例如为什么判为趋势不可信）
  * 都挪到了这里。内容比一屏高，所以必须可滚动，否则下面的高度解耦信息会被裁掉。

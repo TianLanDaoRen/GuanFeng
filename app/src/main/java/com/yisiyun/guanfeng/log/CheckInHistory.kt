@@ -5,7 +5,7 @@ import com.yisiyun.guanfeng.core.CheckInRecord
 import java.io.File
 
 /**
- * 不适打卡的读取。与 [CsvSessionLogger] 共用同一个 external files 目录，
+ * 体感打卡的读取。与 [CsvSessionLogger] 共用同一个 external files 目录，
  * 因此一次 `adb pull` 就能把手表上的全部数据取走。
  */
 object CheckInHistory {

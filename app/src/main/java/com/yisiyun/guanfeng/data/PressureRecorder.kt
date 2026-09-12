@@ -162,6 +162,15 @@ object PressureRecorder {
     /** 体感传感器的脉冲间隔。10 分钟一次：腕温是分钟级慢变量，静息基线也只取低分位数。 */
     private const val PULSE_INTERVAL_MS = 10L * 60L * 1000L
 
+    /**
+     * 低于这个值的心率读数一律视为"没在测"。
+     *
+     * 生理上不可能有人静息心率低于 20，所以这个门限没有误杀风险；
+     * 而 PPG 在脱腕/未锁定时**会稳定上报 0**（真机实测），
+     * 不做处理就会以"0 bpm"的形态进入小时归档与 AI 报告。
+     */
+    private const val MIN_VALID_HEART_RATE_BPM = 20f
+
     /** 恢复历史时：超过这个间隔视为断档，断档之前的数据一律不接（跨空洞拟合会造出假趋势）。 */
     private const val MAX_GAP_MS = 5L * 60L * 1000L
 
@@ -531,7 +540,15 @@ object PressureRecorder {
 
                     Sensor.TYPE_LIGHT -> lightLux = event.values[0]
 
-                    Sensor.TYPE_HEART_RATE -> heartRate = event.values[0]
+                    // 【注意 0 不是心率】传感器在**离开手腕/没锁住**时会持续上报 0，
+                    // 而不是不上报。0 的含义是"没在测"，不是"心率是 0"。
+                    // 原样留着会一路乘进小时归档的中位数，于是 AI 报告里出现
+                    // "这一小时平均心率 0 bpm"——归档是要长期保存的，脏值会传下去。
+                    // 与腕温那条 `values[0] > 1f` 是同一个处理：无效读数一律变 null。
+                    Sensor.TYPE_HEART_RATE -> {
+                        val bpm = event.values.getOrNull(0) ?: 0f
+                        heartRate = bpm.takeIf { it > MIN_VALID_HEART_RATE_BPM }
+                    }
 
                     TYPE_WRIST_TEMPERATURE -> {
                         val values = event.values
@@ -576,7 +593,7 @@ object PressureRecorder {
             // 静息基线：只用「这一段聚合区间内没有垂直运动、没有步数」的静止样本，
             // 取低分位数。瞬时值直接当静息心率是错的（爬楼时也会读到 120）。
             val currentHeartRate = heartRate
-            if (currentHeartRate != null && currentHeartRate > 20f &&
+            if (currentHeartRate != null && currentHeartRate > MIN_VALID_HEART_RATE_BPM &&
                 aggregator.currentSteps == 0 && aggregator.currentAccelPeak < 0.35f &&
                 // 硬上限：静止但心率 >100 的多半是组间休息/刚运动完，
                 // 不能算静息样本。取 10 百分位已经能挡住大部分，这条是第二道闸。

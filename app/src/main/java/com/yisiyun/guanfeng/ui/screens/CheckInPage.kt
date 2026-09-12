@@ -36,7 +36,7 @@ import com.yisiyun.guanfeng.data.RecorderState
 import kotlinx.coroutines.delay
 
 /**
- * 第四屏 · 打卡：把此刻的不适与此刻的气压绑在一起。
+ * 第三屏 · 体感打卡：把此刻的体感与此刻的气压绑在一起。
  *
  * ## 症状标签的来历（不再拍脑袋）
  *
@@ -87,7 +87,7 @@ fun CheckInPage(state: RecorderState) {
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("不适打卡", color = Color(0xFFF2C14E), fontSize = 11.sp)
+            Text("体感打卡", color = Color(0xFFF2C14E), fontSize = 11.sp)
             Spacer(Modifier.fillMaxWidth(0.1f))
             Text(
                 text = feedback ?: "今日 $todayCount 次",
