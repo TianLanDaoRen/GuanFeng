@@ -19,6 +19,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import com.yisiyun.guanfeng.data.WeatherConsent
 import com.yisiyun.guanfeng.ui.components.AlertConfirmOverlay
 import com.yisiyun.guanfeng.data.QweatherClient
+import com.yisiyun.guanfeng.log.QweatherLogger
+import com.yisiyun.guanfeng.ui.screens.ForecastPage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.yisiyun.guanfeng.data.SiteLocation
 import com.yisiyun.guanfeng.ui.components.ForecastSetupOverlay
 import com.yisiyun.guanfeng.ui.components.WeatherSetupStep
@@ -53,12 +57,20 @@ import com.yisiyun.guanfeng.ui.screens.WeatherPage
  * 按 OPPO 交互规范：非屏幕左边缘的左右滑动用于切换应用内功能界面，
  * 多页面时应给出翻页符提示；左边缘的右滑留给系统的返回手势（windowSwipeToDismiss）。
  */
-private const val PAGE_COUNT = 5
+private const val PAGE_COUNT = 6
+
+/**
+ * 默认停在第 1 页（观风），而不是第 0 页。
+ *
+ * 原因是主人定的版面：**天气预报放在"负一屏"**（第 0 页），主屏仍是观风——
+ * 戴着表一抬手要看到的是气压与风雨倾向，预报是"往右多看一眼"的东西。
+ */
+private const val DEFAULT_PAGE = 1
 
 @Composable
 fun GuanFengApp() {
     val state by PressureRecorder.state.collectAsState()
-    val pagerState = rememberPagerState(pageCount = { PAGE_COUNT })
+    val pagerState = rememberPagerState(initialPage = DEFAULT_PAGE, pageCount = { PAGE_COUNT })
 
     val context = LocalContext.current
     val alertSignal by PendingAlertStore.signal.collectAsState()
@@ -67,6 +79,16 @@ fun GuanFengApp() {
 
     // 天气采集的一次性同意。**只在还没问过的时候弹**——
     // SharedPreferences 记一个布尔值就够，不需要为"问过一次了"这种状态上数据库。
+    // 天气页显示的快照：只读已落盘的数据，不自己发请求（断网也能看）。
+    // 一分钟刷新一次就够——数据本身 30 分钟才更新一轮。
+    var snapshot by remember { mutableStateOf<QweatherLogger.Snapshot?>(null) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            snapshot = withContext(Dispatchers.IO) { QweatherLogger.readLatestSnapshot(context) }
+            delay(60_000)
+        }
+    }
+
     // 天气采集的**设置流程**：说明 → 定位 → （失败时的）出路。
     // 已经同意过、也已经有坐标时，整个流程不再出现。见 ForecastSetupOverlay 的注释。
     // 状态机的顺序是主人定的：**先问同意 → 同意了才门控 Wi-Fi → 再走定位**。
@@ -162,10 +184,17 @@ fun GuanFengApp() {
             modifier = Modifier.fillMaxSize().padding(bottom = 14.dp),
         ) { page ->
             when (page) {
-                0 -> WeatherPage(state)
-                1 -> BodyPage(state)
-                2 -> CheckInPage(state)
-                3 -> AssociationPage(state)
+                // 第 0 页是**负一屏**：预报。默认不落在这里，见 DEFAULT_PAGE
+                0 -> ForecastPage(
+                    snapshot = snapshot,
+                    consentGranted = WeatherConsent.isGranted(context),
+                    // 没同意也留一个入口，不耽误使用（主人要求）
+                    onRequestConsent = { setupStep = WeatherSetupStep.Consent },
+                )
+                1 -> WeatherPage(state)
+                2 -> BodyPage(state)
+                3 -> CheckInPage(state)
+                4 -> AssociationPage(state)
                 else -> RecordPage(state)
             }
         }

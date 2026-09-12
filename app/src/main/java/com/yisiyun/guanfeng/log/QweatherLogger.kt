@@ -254,6 +254,115 @@ object QweatherLogger {
         if (!target.exists()) 0 else target.readLines().count { it.isNotBlank() } - 1
     }.getOrDefault(0)
 
+    /** 天气页要显示的一条小时预报。只取界面用得到的几列。 */
+    data class HourLine(
+        val clock: String,
+        val conditionText: String,
+        val tempC: String,
+        val precipProbability: String,
+        val precipMm: String,
+    )
+
+    /** 天气页要显示的一份快照：最近一次取数的实时状况 + 它当时给的逐小时预报。 */
+    data class Snapshot(
+        val fetchedClock: String,
+        val locationSource: String,
+        val conditionText: String,
+        val tempC: String,
+        val feelsLikeC: String,
+        val pressureHpa: String,
+        val humidity: String,
+        val hours: List<HourLine>,
+    )
+
+    /**
+     * 读最近一次采集的快照。
+     *
+     * **天气页只读已落盘的数据，不自己发请求**：页面上写的每一行都是"某次采集当时拿回来的"，
+     * 所以断网也能看（这也符合这个应用"核心不依赖网络"的性格）。要刷新就等下一轮采集。
+     *
+     * 逐小时要按 `fetched_ms` 分组：文件里每次采集都追加 24 行，取数轮次一多，
+     * 直接读尾部会把两次采集混在一起——**那样时间轴会来回跳**。
+     */
+    fun readLatestSnapshot(context: Context): Snapshot? = runCatching {
+        val nowFile = File(directory(context), NOW_FILE)
+        if (!nowFile.exists()) return null
+        // 尾部读取的第一行可能是半截，认表头时必须那一行**确实是表头**（以 timestamp_ms 开头）
+        val nowAll = readTailLines(nowFile, 8 * 1024).filter { it.isNotBlank() }
+        val nowHeader = nowAll.firstOrNull { it.startsWith("timestamp_ms") }?.split(",")
+            ?: NOW_HEADER.split(",")
+        val nowCells = nowAll.last().split(",")
+        if (nowCells.size < 3) return null
+        fun cell(name: String): String {
+            val index = nowHeader.indexOf(name)
+            return if (index in nowCells.indices) nowCells[index] else ""
+        }
+
+        val hourlyFile = File(directory(context), HOURLY_FILE)
+        val hours = if (!hourlyFile.exists()) {
+            emptyList()
+        } else {
+            val lines = readTailLines(hourlyFile, 32 * 1024).filter { it.isNotBlank() }
+            if (lines.size < 2) {
+                emptyList()
+            } else {
+                val header = lines.firstOrNull { it.startsWith("fetched_ms") }?.split(",")
+                    ?: return@runCatching null
+                val rows = lines.drop(1).map { it.split(",") }
+                val fetchedIndex = header.indexOf("fetched_ms")
+                // 取最后一次采集的那一组
+                val lastFetched = rows.last().getOrNull(fetchedIndex).orEmpty()
+                fun col(row: List<String>, name: String): String {
+                    val index = header.indexOf(name)
+                    return if (index in row.indices) row[index] else ""
+                }
+                rows.filter { it.getOrNull(fetchedIndex) == lastFetched }
+                    .take(12) // 页面只放得下十来行
+                    .map { row ->
+                        HourLine(
+                            clock = col(row, "forecast_time"),
+                            conditionText = col(row, "condition_text"),
+                            tempC = col(row, "temp_c"),
+                            precipProbability = col(row, "precip_probability"),
+                            precipMm = col(row, "precip_mm"),
+                        )
+                    }
+            }
+        }
+
+        Snapshot(
+            fetchedClock = cell("clock"),
+            locationSource = cell("location_source"),
+            conditionText = cell("condition_text"),
+            tempC = cell("temp_c"),
+            feelsLikeC = cell("feels_like_c"),
+            pressureHpa = cell("pressure_hpa"),
+            humidity = cell("humidity"),
+            hours = hours,
+        )
+    }.getOrNull()
+
+    /**
+     * 只读文件**尾部**若干字节。
+     *
+     * 逐小时文件每天长 144 KB 左右，一个月就是 4 MB 多——天气页每次刷新都读整份，
+     * 等于每小时白读几 MB，还要在手表上做。尾部 32 KB 足够装下最近一次采集的 24 行。
+     *
+     * 代价是第一行可能是半截（被截断的记录），所以调用方按"第一行当丢弃"处理即可：
+     * 我们要的是**最后一组**，半截的首行不影响。
+     */
+    private fun readTailLines(file: File, bytes: Int): List<String> {
+        if (!file.exists()) return emptyList()
+        val length = file.length()
+        val start = (length - bytes).coerceAtLeast(0L)
+        return java.io.RandomAccessFile(file, "r").use { raf ->
+            raf.seek(start)
+            val buffer = ByteArray((length - start).toInt())
+            raf.readFully(buffer)
+            String(buffer, Charsets.UTF_8).split("\n")
+        }
+    }
+
     private fun directory(context: Context): File =
         context.getExternalFilesDir(null) ?: context.filesDir
 }
