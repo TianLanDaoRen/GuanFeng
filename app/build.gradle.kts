@@ -13,8 +13,18 @@ android {
         applicationId = "com.yisiyun.guanfeng"
         minSdk = 27
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        // 版本号方案（主人 2026-09-12 定）：B{年}{月}.{日}.{当日序号}
+        //   B        = Beta
+        //   202609   = 2026 年 9 月
+        //   .12      = 12 日
+        //   .01      = 当天第一版
+        //
+        // versionCode 必须是与它同源的**单调递增整数**（Android 靠它判断能否覆盖安装），
+        // 所以直接把 B 后面的数字连起来：2026091201。
+        // 上限提醒：int 上限 2147483647，这个 10 位方案到 2147 年才会撞上，不必担心；
+        // 但**不要**改成 11 位（例如把当日序号补到三位），那会溢出。
+        versionCode = 2026091201
+        versionName = "B202609.12.01"
 
         // 仪器测试已移除（见 dependencies 段的说明）。这一行留着是**有意的**：
         // 将来若重新加仪器测试，除它之外还需要那四条 androidTestImplementation。
