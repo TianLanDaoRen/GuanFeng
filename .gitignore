@@ -19,3 +19,7 @@ local.properties
 
 # IDE 本地配置（Android Studio 自己会生成，不入库）
 .idea/
+
+# 和风天气的 JWT 签名密钥——**绝不入库**（本仓库是公开的）
+/libs/qweather/jwt/
+*.pem
