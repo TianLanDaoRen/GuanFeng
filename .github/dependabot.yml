@@ -9,6 +9,13 @@ updates:
     open-pull-requests-limit: 3
     commit-message:
       prefix: "chore(deps)"
+    ignore:
+      # 跨大版本的 Kotlin 编译器升级一律不提（见已关闭的 PR #3 的讨论）：
+      # 本项目不需要新语言特性，而编译器对可空性的推断会随大版本改变，
+      # 那种变化构建不报错、只在运行时显形 —— 而这个应用要连续无人值守跑几周。
+      # 真要升的时候手动改 libs.versions.toml，并把这条 ignore 一起删掉。
+      - dependency-name: "org.jetbrains.kotlin.plugin.compose"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
