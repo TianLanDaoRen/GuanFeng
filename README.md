@@ -252,9 +252,6 @@ JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
 | [`docs/screenshots/`](docs/screenshots/) | 界面截图（`07-qweather.webp` = 负一屏天气预报） |
 | [`docs/assets/`](docs/assets/) | 图标（SVG 源 + PNG） |
 
-> GitHub 与浏览器按内容识别，通常仍能正常显示；但文件名与格式不符会咬到那些
-> **按后缀判断类型**的工具与脚本。修法：改名为 `.webp` 并同步本 README 的引用。
-
 > **天气数据由和风天气提供**（[QWeather](https://www.qweather.com/)）。
 > 天气图标使用和风天气官方图标字体，许可为 **CC BY 4.0（需署名）**；
 > `QweatherIcons.kt` 的图标映射由官方 `qweather-icons.json` 生成，那部分为 MIT。
