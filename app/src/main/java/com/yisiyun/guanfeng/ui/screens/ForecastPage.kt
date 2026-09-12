@@ -92,6 +92,15 @@ private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
     snapshot: QweatherLogger.Snapshot,
     days: List<QweatherLogger.DayLine>,
 ) {
+    // **整页只用一个竖向滚动容器**。
+    // 第一版把横条放在滚动区外面，又让小时列表用 weight(1f) 撑剩余空间——
+    // 固定内容一超高，列表就被压成 0 高度，于是"整页滑不动"。
+    // 教训：在一个已经会溢出的页面上，不要让子块去"分剩余空间"，让它自然流动。
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState()),
+    ) {
     // 当前状况：一行大字，抬手就能看清
     Row(verticalAlignment = Alignment.CenterVertically) {
         WeatherIcon(code = snapshot.conditionCode, tint = Color(0xFF9FD8EE), fontSize = 26.sp)
@@ -150,14 +159,12 @@ private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
     Text("未来几小时", color = Color(0xFF6EE7A8), fontSize = 9.sp, fontWeight = FontWeight.Bold)
     Spacer(Modifier.height(4.dp))
 
-    Column(
-        modifier = Modifier
-            .weight(1f)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         snapshot.hours.forEach { hour -> HourRow(hour) }
     }
+
+    Spacer(Modifier.height(10.dp))
+    } // 竖向滚动容器到此结束
 
     Spacer(Modifier.height(6.dp))
     Text(
