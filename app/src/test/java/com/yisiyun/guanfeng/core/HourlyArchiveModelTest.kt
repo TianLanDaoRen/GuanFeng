@@ -157,4 +157,61 @@ class HourlyArchiveModelTest {
             completed.wristTempAvg,
         )
     }
+
+    private fun bucket(index: Long, samples: Int) = HourlyBucket(
+        hourStartMs = index * hour,
+        avgHpa = 1000f,
+        minHpa = 999f,
+        maxHpa = 1001f,
+        sampleCount = samples,
+    )
+
+    @Test
+    fun `归档修补只补缺失的过去整点`() {
+        // 真机情形（2026-09-12）：睡眠模式在 02:59 把应用停掉，02:00 那个整点没到点就死了，
+        // 于是它从 hourly.csv 里整行消失——而样本文件里那 59 分钟是完整的。
+        //
+        // 注意单位：这里全部按"第几个整点"（小时序号）算，只在传给函数时才乘 hour。
+        // 我第一次写这个用例时写成 `now * hour`，而 now 本身已经是毫秒——
+        // 结果 earliestHourStartMs 被放大到和 currentHourStartMs 同量级，把该选的都筛掉了。
+        // 是测试错了、代码没错：量纲乘两次，和本项目之前那两次"两处量混用"是同一个毛病。
+        val currentHourIndex = 20L
+
+        val selected = missingHourBuckets(
+            existingHourStarts = setOf(18L * hour, 19L * hour),
+            buckets = listOf(
+                bucket(2, 708),               // ← 昨晚 02:00，缺失，应当补
+                bucket(3, 240),               // 缺失的过去整点，也应当补
+                bucket(18, 720),              // 已有 → 不补（补的行没有体感，替换是降级）
+                bucket(19, 712),              // 已有且不满勤 → 仍不补，如实留疤
+                bucket(currentHourIndex, 300),// 当前小时 → 归实时累加器 + backfill，不在这里补
+                bucket(5, 3),                 // 只有 3 个样本的碎片 → 不补
+                bucket(-40, 720),             // 窗口之外的陈年旧账 → 不补
+            ),
+            currentHourStartMs = currentHourIndex * hour,
+            earliestHourStartMs = (currentHourIndex - 24L) * hour,
+        )
+
+        assertEquals(
+            "只该补 02:00 与 03:00 这两个缺失的过去整点",
+            listOf(2L * hour, 3L * hour),
+            selected.map { it.hourStartMs },
+        )
+    }
+
+    @Test
+    fun `归档修补是幂等的_补过的不再补`() {
+        val buckets = listOf(bucket(2, 700), bucket(3, 700))
+
+        val first = missingHourBuckets(setOf(), buckets, 20 * hour, 0L)
+        val second = missingHourBuckets(
+            existingHourStarts = first.map { it.hourStartMs }.toHashSet(),
+            buckets = buckets,
+            currentHourStartMs = 20 * hour,
+            earliestHourStartMs = 0L,
+        )
+
+        assertEquals(2, first.size)
+        assertTrue("补过之后第二次不该再选中，否则归档会被重复行撑大", second.isEmpty())
+    }
 }

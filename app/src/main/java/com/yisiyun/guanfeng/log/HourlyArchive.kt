@@ -38,6 +38,50 @@ object HourlyArchive {
         return File(directory, FILE_NAME)
     }
 
+    /**
+     * 补写**整点缺失**的行（append-only，绝不改动已有行）。
+     *
+     * 由 [com.yisiyun.guanfeng.core.missingHourBuckets] 挑出该补哪几个小时，
+     * 这里只负责落盘。补出来的行**只有气压、没有体感**——原始 CSV 里本就没有
+     * 那一刻的心率与腕温，宁可留空也不拿 0 或旧值冒充（与一次性迁移 `seed` 同一口径）。
+     *
+     * @return 实际补写的行数。
+     */
+    fun appendMissing(
+        context: Context,
+        buckets: List<com.yisiyun.guanfeng.core.HourlyBucket>,
+    ): Int {
+        if (buckets.isEmpty()) return 0
+        val target = file(context)
+        var written = 0
+        runCatching {
+            if (!target.exists()) target.writeText(HEADER + "\n")
+            buckets.forEach { bucket ->
+                target.appendText(
+                    toLine(
+                        HourlyRow(
+                            hourStartMs = bucket.hourStartMs,
+                            weatherAvgHpa = bucket.avgHpa,
+                            weatherMinHpa = bucket.minHpa,
+                            weatherMaxHpa = bucket.maxHpa,
+                            rawAvgHpa = bucket.avgHpa,
+                            samples = bucket.sampleCount,
+                            heartRateAvg = null,
+                            restingHeartRate = null,
+                            wristTempAvg = null,
+                            wristTempMin = null,
+                            wristTempMax = null,
+                            lightAvgLux = null,
+                            lightMinLux = null,
+                        )
+                    ) + "\n"
+                )
+                written++
+            }
+        }
+        return written
+    }
+
     /** 追加一行（只用于**已完成**的小时）。 */
     fun append(context: Context, row: HourlyRow): Boolean = runCatching {
         val target = file(context)

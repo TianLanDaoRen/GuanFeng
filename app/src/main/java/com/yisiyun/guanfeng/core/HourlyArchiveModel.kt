@@ -186,3 +186,46 @@ fun HourAccumulator.backfillCarriedOver(
     }
     return BackfillResult(fedSamples = carried.size, completedRows = completed)
 }
+
+/**
+ * 一个整点至少要凑到这么多个样本才值得单独成行（60 个 = 5 分钟）。
+ * 启动/停机都可能切出几秒钟的碎片，为它们写一整行只会污染长期归档。
+ */
+const val MIN_REPAIR_SAMPLES = 60
+
+/**
+ * 从 [buckets] 里挑出**归档里整点缺失**的那些小时，用于补写。
+ *
+ * ## 为什么需要它（2026-09-12 真机实证）
+ *
+ * 睡眠模式在 **02:59** 把应用整个停掉，而 02:00 这个整点还差一分钟才到点，
+ * 于是它在 `hourly.csv` 里**整行消失**——而 `guanfeng_samples.csv` 里那 59 分钟完整存在。
+ * 既有的 `backfillCarriedOver` 补不到它：那个只覆盖"当前小时"，
+ * 而这次重启已经过去 5.23 小时，且 `loadRecent` 的「断档 > 5 分钟即停」
+ * 把恢复样本清空了，`backfillCarriedOver` 拿到的是空列表。
+ *
+ * 结果是**每晚都会丢一个整点**（睡着的那个小时），一个月就是三十个小时，
+ * 而归档是"永不删除"的长期存储——丢了就真没了（样本文件只留约两周）。
+ *
+ * ## 刻意划的三条边界
+ *
+ * 1. **只补整点缺失的，不碰已存在的行**。已有的行是实时累加器写的，带完整体感数据；
+ *    而补写的行只有气压（原始 CSV 里没有那一刻的心率/腕温）。用补写的行去替换已有的行
+ *    是**降级**，不是修复。已存在但不满勤的行（如被重启切掉一段）保持原样，如实留疤。
+ * 2. **不补当前小时**。它归实时累加器 + `backfillCarriedOver` 管；
+ *    在这里补会让每个整点出现两行（去重虽能兜住，但没必要制造重复）。
+ * 3. **只在 [earliestHourStartMs] 之后补**。太久远的缺失没有修复价值，
+ *    而扫描范围本身也受样本文件尾部长度限制。
+ */
+fun missingHourBuckets(
+    existingHourStarts: Set<Long>,
+    buckets: List<HourlyBucket>,
+    currentHourStartMs: Long,
+    earliestHourStartMs: Long,
+    minSamples: Int = MIN_REPAIR_SAMPLES,
+): List<HourlyBucket> = buckets.filter { bucket ->
+    bucket.hourStartMs < currentHourStartMs &&
+        bucket.hourStartMs >= earliestHourStartMs &&
+        bucket.sampleCount >= minSamples &&
+        bucket.hourStartMs !in existingHourStarts
+}

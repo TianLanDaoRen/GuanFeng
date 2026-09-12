@@ -8,6 +8,7 @@ import android.hardware.SensorManager
 import android.util.Log
 import com.yisiyun.guanfeng.core.HourAccumulator
 import com.yisiyun.guanfeng.core.backfillCarriedOver
+import com.yisiyun.guanfeng.core.missingHourBuckets
 import com.yisiyun.guanfeng.core.WeatherEpisode
 import com.yisiyun.guanfeng.core.WeatherEpisodeTracker
 import com.yisiyun.guanfeng.core.WeatherRule
@@ -139,6 +140,14 @@ object PressureRecorder {
 
     /** 跨会话状态的落盘节奏（不必每条样本都写盘）。 */
     private const val PERSIST_INTERVAL_MS = 5L * 60L * 1000L
+
+    /**
+     * 归档修补的回看窗口。
+     *
+     * 24 小时足够覆盖"昨晚睡着时丢的那个整点"，也与样本文件尾部 2 MB（约一天）匹配。
+     * 再往前的缺失就没有修复价值了——而且样本文件本身也只留约两周。
+     */
+    private const val REPAIR_WINDOW_MS = 24L * 60L * 60L * 1000L
 
     /**
      * 核心传感器的请求周期：5 Hz。
@@ -296,6 +305,38 @@ object PressureRecorder {
                     ),
                 )
                 if (seeded > 0) Log.i(TAG, "小时归档迁移：从原始文件补齐 $seeded 个小时")
+            }
+
+            // 【归档修补】把"采样文件里有、归档里整点缺失"的小时补回来。
+            //
+            // 起因是 2026-09-12 的真机实证：睡眠模式在 02:59 把应用整个停掉，
+            // 而 02:00 那个整点还差一分钟才到点，于是它在 hourly.csv 里整行消失，
+            // 可样本文件里那 59 分钟是完整的。backfillCarriedOver 补不到它——
+            // 那只覆盖"当前小时"，而这次重启已过去 5.23 小时，
+            // 且 loadRecent 的"断档 > 5 分钟即停"把恢复样本清空了。
+            //
+            // 后果是**每晚都会丢一个整点**（睡着的那一小时），而归档是永不删除的长期存储，
+            // 样本文件只留约两周——今天不补，两周后就真没了。所以放在启动时、只跑一次。
+            val repairBuckets = runCatching {
+                SessionHistory.loadTailHourlyBuckets(
+                    context = applicationContext,
+                    nowMs = startedAtMs,
+                    withinMs = REPAIR_WINDOW_MS,
+                )
+            }.getOrElse { error ->
+                Log.w(TAG, "读取归档修补数据失败: $error")
+                emptyList()
+            }
+            val repairTargets = missingHourBuckets(
+                existingHourStarts = HourlyArchive.loadAll(applicationContext)
+                    .map { it.hourStartMs }.toHashSet(),
+                buckets = repairBuckets,
+                currentHourStartMs = (startedAtMs / 3_600_000L) * 3_600_000L,
+                earliestHourStartMs = startedAtMs - REPAIR_WINDOW_MS,
+            )
+            val repaired = HourlyArchive.appendMissing(applicationContext, repairTargets)
+            if (repaired > 0) {
+                Log.i(TAG, "小时归档修补：补回 $repaired 个缺失的整点（只有气压，无体感）")
             }
 
             val restored = runCatching {

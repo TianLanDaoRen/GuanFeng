@@ -131,7 +131,16 @@ object SessionHistory {
     }
 
     /** 从文件尾部读若干字节并解析（跳过可能被切断的首行）。 */
-    private fun readTail(file: File, maxBytes: Long = TAIL_BYTES): List<PressureSample> {
+    private fun readTail(file: File, maxBytes: Long = TAIL_BYTES): List<PressureSample> =
+        parse(readTailLines(file, maxBytes))
+
+    /**
+     * 只读文件**尾部**的行（跳过可能被切断的首行）。
+     *
+     * 注意：返回的第一行**不是表头**（表头在文件开头）。要按列名解析，
+     * 得另外读一次首行——见 [loadTailHourlyBuckets]。
+     */
+    private fun readTailLines(file: File, maxBytes: Long = TAIL_BYTES): List<String> {
         val lines = ArrayList<String>()
         file.inputStream().use { input ->
             val channel = input.channel
@@ -145,7 +154,49 @@ object SessionHistory {
                 if (lines.size >= MAX_ROWS_SCANNED) return@forEach
             }
         }
-        return parse(lines)
+        return lines
+    }
+
+    /**
+     * 把采样文件**尾部**折叠成小时桶，供归档修补使用（见 [missingHourBuckets]）。
+     *
+     * 为什么不复用 [loadHourlyRollup]：那个是**从文件开头**逐行扫、且扫满
+     * `MAX_ROWS_SCANNED`（2 万行）就 break。文件现在约 1.7 万行/天还在长，
+     * 一旦超过 2 万行，它看到的永远是最旧那一段，**最需要修补的最近那几个小时反而扫不到**。
+     * 修补只关心最近，所以直接读尾部。
+     *
+     * 表头必须单独从文件首行取：尾部读出来的第一行是被切断的半行数据。
+     */
+    fun loadTailHourlyBuckets(
+        context: Context,
+        nowMs: Long,
+        withinMs: Long,
+        onlyDecoupled: Boolean = true,
+    ): List<com.yisiyun.guanfeng.core.HourlyBucket> {
+        val file = sampleFile(context)
+        if (!file.isFile) return emptyList()
+        val header = runCatching { file.bufferedReader().use { it.readLine() } }
+            .getOrNull()?.split(',') ?: return emptyList()
+        val indexOfTimestamp = header.indexOf("timestamp_ms")
+        val indexOfWeather = header.indexOf("weather_pressure_hpa")
+        val indexOfRaw = header.indexOf("pressure_hpa")
+        if (indexOfTimestamp < 0) return emptyList()
+        // 要求已解耦时缺列就放弃：口径不同的历史不如不要（与 loadHourlyRollup 同一条规矩）
+        if (onlyDecoupled && indexOfWeather < 0) return emptyList()
+        val indexOfPressure = if (indexOfWeather >= 0) indexOfWeather else indexOfRaw
+        if (indexOfPressure < 0) return emptyList()
+
+        val cutoff = nowMs - withinMs
+        val lines = runCatching { readTailLines(file) }.getOrElse { return emptyList() }
+        val accumulator = com.yisiyun.guanfeng.core.HourlyAccumulator()
+        for (line in lines) {
+            val cells = line.split(',')
+            val timestamp = cells.getOrNull(indexOfTimestamp)?.toLongOrNull() ?: continue
+            if (timestamp < cutoff) continue
+            val pressure = cells.getOrNull(indexOfPressure)?.toFloatOrNull() ?: continue
+            accumulator.add(timestamp, pressure)
+        }
+        return accumulator.buckets().filter { it.hourStartMs >= cutoff }
     }
 
     /**
