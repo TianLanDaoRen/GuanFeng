@@ -293,7 +293,7 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 | `PressureRollupTest` | 3 | 小时级降采样：整点取整、同小时折叠、跨小时分桶并排序 |
 | `AssociationAnalyzerTest` | 6 | 关联统计：**本地日界不按 UTC 切**、大变化日判定、无打卡时不编造比例 |
 | `CheckInHistoryTest` | 4 | 打卡解析：按表头定位列、坏行跳过、缺列不崩 |
-| `HourlyArchiveModelTest` | 6 | 小时归档累加：整点滚动必须先交出上一小时、缺失数据留 null、**腕温取中位数而非均值** |
+| `HourlyArchiveModelTest` | 6 | 小时归档累加：整点滚动必须先交出上一小时、缺失数据留 null、**腕温取中位数而非均值**、**重启后回填仍合成完整的一小时** |
 | `HourlyArchiveTest` | 6 | 归档解析与去重（同整点跨重启重复落盘兜底）、体感概要取中位数、空数据不冒充 |
 | `MarkdownLiteTest` | 7 | 极简 Markdown：**剥掉服务端标语帧**、四类块、粗体拆分、中文硬换行不补空格（夹具用真实接口返回原样文本） |
 | `AiDigestTest` | 7 | 上报摘要：**备注原文必须带上**（那才是可分析的细节）、两段口径、提示词约束、引号转义 |
