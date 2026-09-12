@@ -16,3 +16,6 @@ local.properties
 
 # 真机拉取的会话日志（测试数据，不入库）
 /guanfeng-logs/
+
+# IDE 本地配置（Android Studio 自己会生成，不入库）
+.idea/

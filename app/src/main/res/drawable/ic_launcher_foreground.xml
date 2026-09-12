@@ -1,12 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  观风 · 主图标前景：剪纸风祥云 + 风纹。
+  观风 · 主图标前景：平底剪纸云 + 三条风纹。
 
-  构图（108 视口，主体收在 22–86 的圆形安全区内）：
-    · 墨黑祥云：三个圆叠一个圆角底边，取剪纸的实心感
-    · 朱砂点睛：云心一枚朱砂圆点，落款的意
-    · 风纹两笔：自左向右掠过云下，上一笔右端上卷——"观风"的字面意思
-  只用三色：宣纸米白底、墨黑主体、朱砂一点。
+  与 docs/assets/icon.svg 是同一套几何，按 108 视口的安全区重新投影：
+  原图内容占 512 视口的 x∈[70,418]、y∈[102,411]，缩放 0.172 后落在
+  x∈[22,81]、y∈[29,80]——自适应图标允许的圆形安全区是 [18,90]，居中且留有余量。
+
+  改几何时请两处一起改，并记得 docs/assets/icon.svg 才是唯一的设计源。
+
+  为什么没有朱砂点：版式是"云在风里"，多一个色点只会让缩到 48px 的图形发糊。
+  只有宣纸米白与墨两色——剪影本身必须先成立。
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -14,38 +17,35 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- 祥云：左侧小圆 -->
+    <!-- 云：圆角底边，把四个云瓣连成一片平底云 -->
     <path
-        android:fillColor="#1A1A1A"
-        android:pathData="M32.5,46 a11.5,11.5 0 1,0 23,0 a11.5,11.5 0 1,0 -23,0 z" />
-    <!-- 祥云：中央大圆 -->
+        android:fillColor="#161C24"
+        android:pathData="M40.4,43.3 H69.4 A5.3,5.3 0 0 1 74.7,48.6 V48.7 A5.3,5.3 0 0 1 69.4,54 H40.4 A5.3,5.3 0 0 1 35.1,48.7 V48.6 A5.3,5.3 0 0 1 40.4,43.3 Z" />
+    <!-- 云瓣 ① 左 -->
     <path
-        android:fillColor="#1A1A1A"
-        android:pathData="M47.5,42 a14.5,14.5 0 1,0 29,0 a14.5,14.5 0 1,0 -29,0 z" />
-    <!-- 祥云：右侧小圆 -->
+        android:fillColor="#161C24"
+        android:pathData="M35.8,45.4 a7.9,7.9 0 1,0 15.8,0 a7.9,7.9 0 1,0 -15.8,0 z" />
+    <!-- 云瓣 ② 中：最饱满的一瓣，云的重心在它身上 -->
     <path
-        android:fillColor="#1A1A1A"
-        android:pathData="M67,50 a10,10 0 1,0 20,0 a10,10 0 1,0 -20,0 z" />
-    <!-- 祥云：圆角底边，把三个圆连成一片云 -->
+        android:fillColor="#161C24"
+        android:pathData="M44.4,39.6 a11,11 0 1,0 22,0 a11,11 0 1,0 -22,0 z" />
+    <!-- 云瓣 ③ 右 -->
     <path
-        android:fillColor="#1A1A1A"
-        android:pathData="M29,56 a6,6 0 0 1 6,-6 h44 a6,6 0 0 1 6,6 v0 a6,6 0 0 1 -6,6 h-44 a6,6 0 0 1 -6,-6 z" />
+        android:fillColor="#161C24"
+        android:pathData="M57.4,42.3 a9.3,9.3 0 1,0 18.6,0 a9.3,9.3 0 1,0 -18.6,0 z" />
+    <!-- 云瓣 ④ 最右小瓣 -->
+    <path
+        android:fillColor="#161C24"
+        android:pathData="M67.8,47.5 a6.5,6.5 0 1,0 13,0 a6.5,6.5 0 1,0 -13,0 z" />
 
-    <!-- 朱砂点睛 -->
+    <!-- 风纹三条：右端厚、左端收尖；右端用半圆弧收笔，不是切平 -->
     <path
-        android:fillColor="#C0442E"
-        android:pathData="M50.5,53 a4.5,4.5 0 1,0 9,0 a4.5,4.5 0 1,0 -9,0 z" />
-
-    <!-- 风纹上一笔：右端上卷 -->
+        android:fillColor="#161C24"
+        android:pathData="M77.4,54 Q53.0,48.5 24.8,56.4 Q53.0,54 77.4,58.8 A2.4,2.4 0 0 1 77.4,54 Z" />
     <path
-        android:pathData="M22,70 H54 C60,70 62.5,66 62.5,61.5"
-        android:strokeColor="#1A1A1A"
-        android:strokeWidth="4.5"
-        android:strokeLineCap="round" />
-    <!-- 风纹下一笔 -->
+        android:fillColor="#161C24"
+        android:pathData="M72.2,64.7 Q48.8,59.2 22.0,67.4 Q48.8,65.0 72.2,69.1 A2.2,2.2 0 0 1 72.2,64.7 Z" />
     <path
-        android:pathData="M22,79 H44"
-        android:strokeColor="#1A1A1A"
-        android:strokeWidth="4.5"
-        android:strokeLineCap="round" />
+        android:fillColor="#161C24"
+        android:pathData="M62.6,75.7 Q46.8,71.2 30.3,77.0 Q46.8,75.3 62.6,79.5 A1.9,1.9 0 0 1 62.6,75.7 Z" />
 </vector>

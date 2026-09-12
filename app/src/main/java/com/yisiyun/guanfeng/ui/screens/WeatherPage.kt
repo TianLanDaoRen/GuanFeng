@@ -27,7 +27,13 @@ import com.yisiyun.guanfeng.core.WeatherRule
 import com.yisiyun.guanfeng.data.RecorderState
 import com.yisiyun.guanfeng.ui.components.TrendGauge
 
-/** 第一屏 · 观风：主读数就是那个环形仪表，一眼看风雨倾向与趋势位置。 */
+/**
+ * 第一屏 · 观风。
+ *
+ * 一眼看两件事：**环**上是气压在怎么变（左急降、右急升），
+ * **环心**的大字是风雨倾向（低/中/高…）。
+ * 这两者不是一回事——环说的是趋势，环心说的是结论。
+ */
 @Composable
 fun WeatherPage(state: RecorderState) {
     // 双层引擎：正式窗口（3 小时）成熟前，先用速评窗口（5 分钟）顶上。

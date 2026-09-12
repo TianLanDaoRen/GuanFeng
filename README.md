@@ -17,6 +17,7 @@
 ![Tests](https://img.shields.io/badge/tests-100%20passing-3FB950?style=flat-square)
 ![Offline](https://img.shields.io/badge/core-100%25%20offline-8957E5?style=flat-square)
 ![Network](https://img.shields.io/badge/network-optional%2C%20opt--in-6E7681?style=flat-square)
+![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-3B7DD8?style=flat-square)
 
 </div>
 
@@ -52,7 +53,7 @@
 <td width="50%" valign="top">
 
 **① 观风**
-主读数就是那个环形仪表：指针落在哪一段，就是风雨倾向。左半从绿到红是"急降→平稳"，右半到蓝是"急升"。下方一行给出这次判断的依据（3 小时净变压）。
+中间那个**环代表气压变化情况**——指针落在哪一段，就是此刻气压在怎么变：左端「急降」、右端「急升」。环**正中的大字是风雨倾向**（低 / 中 / 高…），它下面那行是趋势等级（平稳）。最下方一行给出这次判断的依据（3 小时净变压）。
 
 </td>
 <td width="50%" valign="top">
@@ -79,9 +80,13 @@
 </table>
 
 <div align="center">
-<img src="docs/screenshots/00-alert.png" width="150"/> <img src="docs/screenshots/05-ai-consent.png" width="150"/>
-<br/>
-<sub>左：转坏时的提醒卡（系统通知被平台白名单拦掉后，改成应用内确认卡 + 直接驱动马达）　右：AI 报告发出前的授权弹窗</sub>
+
+| 转坏时的提醒卡 | 发出前的授权弹窗 | AI 报告 |
+|:---:|:---:|:---:|
+| <img src="docs/screenshots/00-alert.png" width="150"/> | <img src="docs/screenshots/05-ai-consent.png" width="150"/> | <img src="docs/screenshots/06-ai-report.png" width="150"/> |
+
+<sub>左：平台白名单拦掉了第三方本地通知，于是改成应用内确认卡 + 直接驱动马达　·　中：教你确认发什么、不发什么　·　右：报告里它自己区分出了"还没有不适打卡"，而不是把舒适当成症状</sub>
+
 </div>
 
 <br/>
@@ -183,7 +188,17 @@ JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
 
 ## 许可
 
-私人自用项目，非上架产品。一笥云工作室（YiSiYunStudio）。
+本项目采用 **[PolyForm Noncommercial License 1.0.0](LICENSE)**。
+
+| | |
+|:---:|---|
+| ✅ | **个人学习、研究、把玩**；阅读、转载、修改源码；非盈利地分享与二次创作 |
+| ❌ | **任何商业用途**——包括用它做付费产品或作为商业服务的一部分 |
+| 📌 | **源码所有权归作者保留**：一笥云工作室（YiSiYunStudio）。转载与修改需保留本许可与版权声明 |
+
+> 一句话：**随便看、随便改、别拿去赚钱。**
+
+私人自用项目，非上架产品。
 
 <div align="center">
 <br/>
