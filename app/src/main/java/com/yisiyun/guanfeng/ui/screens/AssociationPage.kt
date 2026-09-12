@@ -522,26 +522,29 @@ private fun PressureCheckInChart(
     val visible = hourly.filter { it.hourStartMs >= fromMs - 3_600_000L }
     if (visible.isEmpty()) return
 
-    // 必须用**画出来的那个量**（小时均值 avgHpa）来定纵轴范围。
-    // 原先用的是每小时的 min/max——那是另一个量，它被单小时内的极值撑开，
-    // 而曲线画的却是均值，于是曲线永远只占纵轴一小截（主人两次截图都在问这件事）。
-    // 教训：**轴的取值口径必须与图形的取值口径完全一致。**
-    val dataMin = visible.minOf { it.avgHpa }
-    val dataMax = visible.maxOf { it.avgHpa }
-    // 纵轴自动贴合数据：让最低点与最高点几乎占满整条纵轴（主人要求）。
+    // ## 纵轴范围：用**每小时 min–max 的极差**定，并且把 min–max 画成淡色带
     //
-    // 我上一轮给纵轴设了 1.0 hPa 的最小量程，理由是"防止微小起伏被画成大山"——
-    // 但那个顾虑是多余的：**把上下限的数值标在图上，量级自然就交代清楚了**；
-    // 而固定最小量程的副作用是真实跨度一大（比如天气过程里的 12 hPa）曲线就被压扁，
-    // 什么也读不出来。宁可让分辨率最大化、由数字说明量级。
+    // 这一段来回过几次，把过程留着免得再绕（也免得我第三次把结论忘掉）：
     //
+    //   ① 最初轴用每小时 min/max，曲线画的却是小时均值 → 曲线永远只占纵轴一小截，
+    //      主人两次截图都在问这件事。"轴的取值口径必须与图形的口径一致"是对的。
+    //   ② 当时的修法是把轴也改成按均值定。但那等于**把观测到的真实极值藏起来**：
+    //      黄点（打卡那一刻的瞬时值）看起来"不在线上"，根子就在这里。
+    //   ③ 主人 2026-09-12 给了真正的解法：**把 min–max 画出来，并用它定轴。**
+    //      于是两件事同时成立——淡色带恰好铺满纵轴（观测范围被完整交代），
+    //      而均值折线因为"一小时内的气压变化本来就小"仍然几乎占满纵轴。
+    //
+    // 我原先以为"占满纵轴"与"如实呈现范围"是对立的，那是把问题想窄了：
+    // 对立的从来不是这两个，而是**只画一个量、却拿另一个量去定轴**。
+    val bandMin = visible.minOf { it.minHpa }
+    val bandMax = visible.maxOf { it.maxHpa }
     // 仍然保留一个极小的下限，只为了避免"数据完全平坦时除零"这种退化情形。
-    val dataSpan = (dataMax - dataMin).coerceAtLeast(DEGENERATE_SPAN_HPA)
-    val pad = dataSpan * 0.05f
-    val low = dataMin - pad
-    val high = dataMax + pad
-    // 映射用它自己的量程：上面加了 padding，就不能再拿 dataSpan 当分母，
-    // 否则曲线会超出上下边界 5%（这类"两个量混用"的错在这个文件里犯过两次了）。
+    val bandSpan = (bandMax - bandMin).coerceAtLeast(DEGENERATE_SPAN_HPA)
+    val pad = bandSpan * 0.05f
+    val low = bandMin - pad
+    val high = bandMax + pad
+    // 映射用它自己的量程：上面加了 padding，就不能再拿 bandSpan 当分母，
+    // 否则图形会超出上下边界 5%（这类"两个量混用"的错在这个文件里犯过两次了）。
     val axisSpan = high - low
 
     Column(modifier = modifier) {
@@ -568,6 +571,48 @@ private fun PressureCheckInChart(
                     val x = size.width * col / 4f
                     drawLine(gridColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
                 }
+
+                // 淡色带：每小时的 min–max。先画带再画线，线压在带上。
+                //
+                // 断档规则与折线**完全一致**（间隔 > 2 小时视为断档）：跨空洞把带连起来，
+                // 会画出一段并不存在的"渐变"，那和跨空洞做回归是同一类错误。
+                val bandColor = Color(0x2E7FD1E8)
+                fun drawEnvelope(from: Int, to: Int) {
+                    if (to <= from) {
+                        // 只有单独一个小时：画一条竖线，别退化成一个看不见的点
+                        val only = visible[from]
+                        val x = xOf(only.hourStartMs)
+                        drawLine(
+                            color = bandColor,
+                            start = Offset(x, yOf(only.maxHpa)),
+                            end = Offset(x, yOf(only.minHpa)),
+                            strokeWidth = 3f,
+                        )
+                        return
+                    }
+                    val band = Path()
+                    for (i in from..to) {
+                        val bucket = visible[i]
+                        val x = xOf(bucket.hourStartMs)
+                        if (i == from) band.moveTo(x, yOf(bucket.maxHpa))
+                        else band.lineTo(x, yOf(bucket.maxHpa))
+                    }
+                    for (i in to downTo from) {
+                        band.lineTo(xOf(visible[i].hourStartMs), yOf(visible[i].minHpa))
+                    }
+                    band.close()
+                    drawPath(path = band, color = bandColor)
+                }
+                var runStart = 0
+                visible.forEachIndexed { index, bucket ->
+                    val broken = index > 0 &&
+                        bucket.hourStartMs - visible[index - 1].hourStartMs > 2L * 3_600_000L
+                    if (broken) {
+                        drawEnvelope(runStart, index - 1)
+                        runStart = index
+                    }
+                }
+                drawEnvelope(runStart, visible.lastIndex)
 
                 // 折线：仅在相邻小时连续时才连线（超 2 小时视为断档）
                 val path = Path()
