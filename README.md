@@ -296,7 +296,7 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 ./gradlew :app:testDebugUnitTest
 ```
 
-全部 **96 个用例**在 JVM 上运行、不依赖手表，分十七个测试类：
+全部 **100 个用例**在 JVM 上运行、不依赖手表，分十七个测试类：
 
 | 测试类 | 用例 | 覆盖什么 |
 |---|---|---|
@@ -306,8 +306,8 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 | `SampleAggregatorTest` | 6 | 聚合口径：气压中位数抗尖峰、加速度取峰值、步数求和、flush 清零 |
 | `ElevationOffsetAccumulationTest` | 3 | **天气分量解耦**：平稳时不报高度分量、电梯下行可累加、原始降 7.2 hPa 时解耦后跨度 < 1 hPa |
 | `PressureRollupTest` | 3 | 小时级降采样：整点取整、同小时折叠、跨小时分桶并排序 |
-| `AssociationAnalyzerTest` | 6 | 关联统计：**本地日界不按 UTC 切**、大变化日判定、无打卡时不编造比例 |
-| `CheckInHistoryTest` | 4 | 打卡解析：按表头定位列、坏行跳过、缺列不崩 |
+| `AssociationAnalyzerTest` | 8 | 关联统计：**本地日界不按 UTC 切**、大变化日判定、无打卡时不编造比例 |
+| `CheckInHistoryTest` | 6 | 打卡解析：按表头定位列、坏行跳过、缺列不崩 |
 | `HourlyArchiveModelTest` | 8 | 小时归档累加：整点滚动必须先交出上一小时、缺失数据留 null、**腕温取中位数而非均值**、**重启后回填仍合成完整的一小时** |
 | `HourlyArchiveTest` | 6 | 归档解析与去重（同整点跨重启重复落盘兜底）、体感概要取中位数、空数据不冒充 |
 | `MarkdownLiteTest` | 7 | 极简 Markdown：**剥掉服务端标语帧**、四类块、粗体拆分、中文硬换行不补空格（夹具用真实接口返回原样文本） |
