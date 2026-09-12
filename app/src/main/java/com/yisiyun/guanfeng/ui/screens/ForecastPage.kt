@@ -346,15 +346,17 @@ private fun MetricCard(
             .background(Color(0xFF161616), RoundedCornerShape(8.dp))
             .padding(horizontal = 7.dp, vertical = 6.dp),
     ) {
-        Text(label, color = Color(0xFF7A7A7A), fontSize = 7.sp)
+        // 单位跟着**标签**走，不跟数值挤一行：格子小，让数值独占一行才能一眼看清，
+        // 单位属于"知道就行"的信息。第一版把单位放在数值旁边，结果 1018.18 一长，
+        // "hPa" 就被逐字挤成竖排三行——Row 里没设 maxLines 就是这个下场。
+        Text(
+            if (unit.isBlank()) label else "$label · $unit",
+            color = Color(0xFF7A7A7A),
+            fontSize = 7.sp,
+            maxLines = 1,
+        )
         Spacer(Modifier.height(2.dp))
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(value, color = valueColor, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            if (unit.isNotBlank()) {
-                Spacer(Modifier.width(2.dp))
-                Text(unit, color = Color(0xFF7A7A7A), fontSize = 7.sp)
-            }
-        }
+        Text(value, color = valueColor, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
 

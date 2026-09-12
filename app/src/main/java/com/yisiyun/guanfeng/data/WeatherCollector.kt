@@ -2,6 +2,8 @@ package com.yisiyun.guanfeng.data
 
 import android.content.Context
 import android.util.Log
+import com.yisiyun.guanfeng.data.PendingAlertStore
+import com.yisiyun.guanfeng.service.TrendNotifier
 import com.yisiyun.guanfeng.log.QweatherLogger
 
 /**
@@ -51,6 +53,7 @@ object WeatherCollector {
     private const val KEY_LAST_AT = "last_fetch_at"
     private const val KEY_LAST_NOTE = "last_fetch_note"
     private const val KEY_LAST_OK = "last_fetch_ok"
+    private const val KEY_SEEN_ALERTS = "seen_alert_ids"
 
     /** 采集结果，供界面显示"上次什么时候采的、成没成"。 */
     data class Outcome(
@@ -185,9 +188,36 @@ object WeatherCollector {
             problems += "空气质量取数失败：${air.error}"
         }
 
+        // 天气预警：落盘 + **把新预警接进提醒链路**
+        var alertRows = 0
+        val alerts = QweatherClient.fetchAlerts(fix.lat, fix.lon)
+        if (alerts.data != null) {
+            for (alert in alerts.data) {
+                QweatherLogger.append(
+                    context = context,
+                    fileName = QweatherLogger.ALERT_FILE,
+                    header = QweatherLogger.ALERT_HEADER,
+                    row = QweatherLogger.formatAlertRow(nowMs, fix.lat, fix.lon, alert),
+                )
+                alertRows += 1
+                // **同一条预警只提醒一次**：预警会随天气系统更新，同一 id 反复震动就成了噪音源，
+                // 而"被关掉的提醒等于不存在"——这个应用在提醒上的原则一直是这样。
+                if (isNewAndSevere(context, alert)) {
+                    PendingAlertStore.record(
+                        context = context,
+                        title = "⚠ " + alert.eventName.ifBlank { "天气预警" },
+                        text = alert.headline.ifBlank { alert.description }.take(140),
+                    )
+                    TrendNotifier.vibrateAlert(context)
+                }
+            }
+        } else {
+            problems += "预警取数失败：${alerts.error}"
+        }
+
         val ok = nowRows > 0 || hourlyRows > 0
         val note = if (ok) {
-            "${fix.source} · 实时 ${nowRows} 行 · 逐小时 ${hourlyRows} 行 · 逐天 ${dayRows} 行 · 空气 ${airRows} 行" +
+            "${fix.source} · 实时 ${nowRows} 行 · 逐小时 ${hourlyRows} 行 · 逐天 ${dayRows} 行 · 空气 ${airRows} 行 · 预警 ${alertRows} 条" +
                 problems.joinToString("；", prefix = if (problems.isEmpty()) "" else "；")
         } else {
             problems.joinToString("；")
@@ -204,6 +234,28 @@ object WeatherCollector {
             .putBoolean(KEY_LAST_OK, outcome.ok)
             .apply()
         return outcome
+    }
+
+    /**
+     * 值不值得为它震动一次。
+     *
+     * 门槛定在 moderate：minor（"对生命财产威胁极小"）不该打扰人，
+     * 而 severe / extreme 显然必须打扰。这个判断**用的是和风给的 severity 字段**，
+     * 不是我们自己按事件名猜——气象台的评级比我们猜得准。
+     */
+    private fun isNewAndSevere(context: Context, alert: QweatherClient.Alert): Boolean {
+        if (alert.id.isBlank()) return false
+        val severe = when (alert.severity.lowercase()) {
+            "moderate", "severe", "extreme" -> true
+            else -> false
+        }
+        if (!severe) return false
+        val p = prefs(context)
+        val seen = p.getStringSet(KEY_SEEN_ALERTS, emptySet()) ?: emptySet()
+        if (alert.id in seen) return false
+        // 记下来。只留最近 200 条，免得这个集合无限增长
+        p.edit().putStringSet(KEY_SEEN_ALERTS, (seen + alert.id).toList().takeLast(200).toSet()).apply()
+        return true
     }
 
     private fun prefs(context: Context) =

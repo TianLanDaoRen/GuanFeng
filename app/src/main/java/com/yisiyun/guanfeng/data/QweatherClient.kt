@@ -87,6 +87,25 @@ object QweatherClient {
      * 想要更久得升级订阅——我们不需要：横条上"昨天"那段本来就不做（那是历史数据）。
      */
     /**
+     * 一条天气预警。
+     *
+     * 和风把气象台发布的预警原文整条给了我们：严重程度、紧迫程度、颜色（含 RGB）、
+     * 图标码、有效期、标题、描述，还有**防御指南**（instruction）——
+     * 最后这条正是"该震动你一下"的信息该有的样子：不只说发生了什么，还说该怎么办。
+     */
+    data class Alert(
+        val id: String,
+        val eventName: String,
+        val severity: String,
+        val headline: String,
+        val description: String,
+        val instruction: String,
+        val colorCode: String,
+        val iconCode: String,
+        val expireTime: String,
+    )
+
+    /**
      * 实时空气质量。
      *
      * 只取"中国大陆标准"那一套指数：和风同时返回多种（美标、QAQI 等），
@@ -189,6 +208,25 @@ object QweatherClient {
 
     suspend fun fetchNow(lat: Double, lon: Double): Fetch<Now> =
         fetch("weather/v1/current/$lat/$lon") { parseNow(JSONObject(it)) }
+
+    suspend fun fetchAlerts(lat: Double, lon: Double): Fetch<List<Alert>> =
+        fetch("weatheralert/v1/current/$lat/$lon") { json ->
+            val alerts = JSONObject(json).optJSONArray("alerts") ?: return@fetch emptyList()
+            (0 until alerts.length()).map { index ->
+                val item = alerts.getJSONObject(index)
+                Alert(
+                    id = item.optString("id"),
+                    eventName = item.optJSONObject("eventType")?.optString("name").orEmpty(),
+                    severity = item.optString("severity"),
+                    headline = item.optString("headline"),
+                    description = item.optString("description"),
+                    instruction = item.optString("instruction"),
+                    colorCode = item.optJSONObject("color")?.optString("code").orEmpty(),
+                    iconCode = item.optString("icon"),
+                    expireTime = item.optString("expireTime"),
+                )
+            }
+        }
 
     suspend fun fetchAir(lat: Double, lon: Double): Fetch<Air> =
         fetch("airquality/v1/current/$lat/$lon") { json ->

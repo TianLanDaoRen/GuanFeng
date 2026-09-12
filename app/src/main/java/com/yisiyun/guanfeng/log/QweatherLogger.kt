@@ -40,6 +40,7 @@ object QweatherLogger {
     const val HOURLY_FILE = "qweather_hourly.csv"
     const val DAILY_FILE = "qweather_daily.csv"
     const val AIR_FILE = "qweather_air.csv"
+    const val ALERT_FILE = "qweather_alerts.csv"
 
     /**
      * 列的顺序两处（表头与格式化函数）必须一致，改名时一起改。
@@ -63,6 +64,9 @@ object QweatherLogger {
 
     const val AIR_HEADER =
         "fetched_ms,fetched_clock,lat,lon,aqi,category,primary_pollutant,pm25,pm10"
+
+    const val ALERT_HEADER =
+        "fetched_ms,fetched_clock,lat,lon,alert_id,event,severity,color,icon,expire_time,headline"
 
     private val clockFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
 
@@ -118,6 +122,26 @@ object QweatherLogger {
         num(now.uvIndex),
         locationSource,
         httpMs.toString(),
+    ).joinToString(",")
+
+    fun formatAlertRow(
+        fetchedMs: Long,
+        lat: Double,
+        lon: Double,
+        alert: QweatherClient.Alert,
+    ): String = listOf(
+        fetchedMs.toString(),
+        clockFormat.format(Date(fetchedMs)),
+        num(lat, 4),
+        num(lon, 4),
+        alert.id,
+        alert.eventName,
+        alert.severity,
+        alert.colorCode,
+        alert.iconCode,
+        alert.expireTime,
+        // 标题里可能带逗号——CSV 不做引号转义，一个逗号就会把列切开
+        alert.headline.replace(',', '，'),
     ).joinToString(",")
 
     fun formatAirRow(
