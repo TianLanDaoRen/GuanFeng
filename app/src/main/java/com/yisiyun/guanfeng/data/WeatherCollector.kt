@@ -38,8 +38,14 @@ object WeatherCollector {
      */
     private const val RETRY_INTERVAL_MS = 5L * 60L * 1000L
 
-    /** 每个采集周期里静默刷新位置的预算（主人定 30 秒）。超时就沿用历史坐标。 */
-    private const val SILENT_REFRESH_MS = 30_000L
+    /**
+     * 每个采集周期里静默刷新位置的预算（主人定 100 秒）。
+     *
+     * 为什么给到 100 秒这么长：GPS 冷启动在户外常要几十秒才出第一次定位，
+     * 给太短等于每轮都白试。而它是**静默**的——不挡界面、不影响传感器采样，
+     * 所以等得起；超时也只是沿用上次的坐标，没有任何代价。
+     */
+    private const val SILENT_REFRESH_MS = 100_000L
 
     private const val PREFS = "guanfeng_weather"
     private const val KEY_LAST_AT = "last_fetch_at"

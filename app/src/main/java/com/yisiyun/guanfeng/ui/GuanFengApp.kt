@@ -18,6 +18,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.yisiyun.guanfeng.data.WeatherConsent
 import com.yisiyun.guanfeng.ui.components.AlertConfirmOverlay
+import com.yisiyun.guanfeng.data.QweatherClient
 import com.yisiyun.guanfeng.data.SiteLocation
 import com.yisiyun.guanfeng.ui.components.ForecastSetupOverlay
 import com.yisiyun.guanfeng.ui.components.WeatherSetupStep
@@ -82,8 +83,17 @@ fun GuanFengApp() {
         setupStep = WeatherSetupStep.Locating(0)
         scope.launch {
             val fix = SiteLocation.acquire(context)
-            setupStep = if (fix != null) {
-                null
+            if (fix != null) {
+                setupStep = null
+                return@launch
+            }
+            // GPS 没定上：先问一次网络推断（IP 定位），拿到就摆给使用者看，由他决定。
+            // **不偷偷用**——这是这一版与最初那版"配置兜底坐标"的根本区别。
+            val network = SiteLocation.networkFix(context)
+            setupStep = if (network != null) {
+                // 把坐标换成人类可读的城市名。查不到也不影响使用——坐标本身已经拿到了。
+                val name = QweatherClient.fetchCityName(network.lat, network.lon)
+                WeatherSetupStep.NetworkFound(city = name, accuracyKm = 10)
             } else {
                 WeatherSetupStep.Failed(hasRemembered = SiteLocation.hasRemembered(context))
             }

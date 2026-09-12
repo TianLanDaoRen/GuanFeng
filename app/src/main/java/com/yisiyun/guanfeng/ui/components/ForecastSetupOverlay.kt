@@ -49,6 +49,12 @@ sealed interface WeatherSetupStep {
 
     /** 定位失败，给出路。 */
     data class Failed(val hasRemembered: Boolean) : WeatherSetupStep
+
+    /**
+     * GPS 定不上，但**网络推断出了位置**（IP 定位）。
+     * 这是测量而不是猜测，所以可以给"就用这个"——但仍要使用者点头，并告知精度。
+     */
+    data class NetworkFound(val city: String?, val accuracyKm: Int) : WeatherSetupStep
 }
 
 @Composable
@@ -73,22 +79,49 @@ fun ForecastSetupOverlay(
                 Text("正在定位…", color = Color(0xFF7FD1E8), fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(7.dp))
                 Text(
-                    "已等 ${step.elapsedSeconds} 秒。手表要见到天空才锁得上星，" +
-                        "到窗边或户外会快很多。",
+                    "已等 ${step.elapsedSeconds} 秒。卫星定位要看得见天空，" +
+                        "而且同时看到至少四颗卫星才算数，所以室内通常定不上——" +
+                        "到户外或窗边再试。",
                     color = Color(0xFFD0D0D0),
                     fontSize = 9.sp,
                     lineHeight = 12.sp,
                 )
                 Spacer(Modifier.height(7.dp))
                 Text(
-                    "拿到坐标才会开始采集天气——不用兜底值替你猜。" +
-                        "取到之后长期复用，采集本身不会再开 GPS。",
+                    "拿到坐标才动。之后每轮采集都会静默更新一次定位，" +
+                        "更新不上就沿用上次的，不会因为定位失败而停止采集。",
                     color = Color(0xFF8A8A8A),
                     fontSize = 8.sp,
                     lineHeight = 11.sp,
                 )
                 Spacer(Modifier.weight(1f))
                 FullWidthButton("取消", Color(0xFF242424), Color(0xFF9A9A9A), onCancelLocating)
+            }
+
+            is WeatherSetupStep.NetworkFound -> {
+                Text("在屋里，定不上星", color = Color(0xFFF2C14E), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(7.dp))
+                Text(
+                    "但按这台手表所在网络的出口位置，推断出你在" +
+                        "「${step.city ?: "未知城市"}」，精度约 ${step.accuracyKm} 公里。",
+                    color = Color(0xFFD0D0D0),
+                    fontSize = 9.sp,
+                    lineHeight = 12.sp,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "这是网络出口所在的区域，常常是运营商在省内的节点，" +
+                        "不一定正好是你所在的城市。天气本身是城市级的，一般够用；" +
+                        "要更准就到户外点「再试定位」拿卫星定位。来源会如实记进 CSV。",
+                    color = Color(0xFF8A8A8A),
+                    fontSize = 8.sp,
+                    lineHeight = 11.sp,
+                )
+                Spacer(Modifier.weight(1f))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FullWidthButton("就用这个", Color(0xFF2A6C86), Color(0xFFD8F2FA), onUseRemembered)
+                    FullWidthButton("再试定位", Color(0xFF242424), Color(0xFF9A9A9A), onRetry)
+                }
             }
 
             is WeatherSetupStep.Failed -> {

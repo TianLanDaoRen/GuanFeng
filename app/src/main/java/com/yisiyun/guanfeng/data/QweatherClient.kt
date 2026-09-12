@@ -105,6 +105,58 @@ object QweatherClient {
 
     data class Fetch<T>(val data: T?, val httpStatus: Int, val elapsedMs: Long, val error: String?)
 
+    /** 网络推断出来的位置。见 [fetchNetworkLocation]。 */
+    data class NetworkPlace(val lat: Double, val lon: Double, val city: String?, val accuracyKm: Int)
+
+    /**
+     * **网络定位**——按请求来源 IP 反推城市，等价于高德的「IP 定位」。
+     *
+     * ## 为什么需要它
+     *
+     * 这台手表上 GPS 是唯一能用的定位源（`dumpsys location` 里只有 passive 与 gps，
+     * 没有 network provider），而 GPS 要见天——室内定不上。于是"在屋里就采不到天气"。
+     *
+     * ## 它为什么能成立
+     *
+     * Vercel 给每个进来的请求注入了来源 IP 的粗略位置（`x-vercel-ip-*`），
+     * 代理把它转成一个坐标返回。**不需要设备任何定位权限、不需要第三方 SDK、
+     * 也不需要把 IP 交给任何第三方**——IP 本来就在请求头里。
+     *
+     * ## 精度与它必须被标注的原因
+     *
+     * 城市级（几公里到十几公里）。对天气够用（气压场本就平滑、预报本身就是城市级），
+     * 但**必须如实记录来源**：事后没人分得清哪条 CSV 是 GPS 来的、哪条是 IP 推的，
+     * 校准就会把两种精度的数据混在一起算。
+     */
+    suspend fun fetchNetworkLocation(): Fetch<NetworkPlace> =
+        fetch("gf/locate") { json ->
+            val o = JSONObject(json)
+            NetworkPlace(
+                lat = o.getDouble("lat"),
+                lon = o.getDouble("lon"),
+                city = o.optString("city").takeIf { it.isNotBlank() && it != "null" },
+                accuracyKm = o.optInt("accuracyKm", 10),
+            )
+        }
+
+    /**
+     * 坐标 → 城市名（和风 GeoAPI 的逆地理）。
+     *
+     * 只为让界面能说出"你在哪"，**不改变坐标本身**：IP 定位给出的坐标就是网络出口的位置，
+     * 反查只是给它一个人类可读的名字。注意 location 参数是 **经度在前**。
+     */
+    suspend fun fetchCityName(lat: Double, lon: Double): String? =
+        fetch("geo/v2/city/lookup?location=$lon,$lat") { json ->
+            val list = JSONObject(json).optJSONArray("location") ?: return@fetch ""
+            if (list.length() == 0) return@fetch ""
+            val first = list.getJSONObject(0)
+            val province = first.optString("adm1")
+            val city = first.optString("adm2")
+            val name = first.optString("name")
+            // 省 + 市 + 区：直辖市会重复（北京市/北京市），去一下重
+            listOf(province, city, name).filter { it.isNotBlank() }.distinct().joinToString(" ")
+        }.data?.takeIf { it.isNotBlank() }
+
     suspend fun fetchNow(lat: Double, lon: Double): Fetch<Now> =
         fetch("weather/v1/current/$lat/$lon") { parseNow(JSONObject(it)) }
 

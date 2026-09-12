@@ -158,16 +158,36 @@ object SiteLocation {
     }
 
     /**
-     * 采集周期里的**静默刷新**：试一次定位（默认 30 秒），失败就沿用历史坐标。
+     * 用**网络推断**的位置作为兜底（IP 定位，见 QweatherClient.fetchNetworkLocation）。
+     *
+     * 与"配置里的兜底坐标"有本质区别：那个是**替使用者猜**，这个是**测量**——
+     * 测的是"这台设备所在的网络出口在哪"，来源会如实写进 CSV。
+     * 主人对前者的反对是对的，对后者不成立。
+     */
+    suspend fun networkFix(context: Context): Fix? {
+        val result = QweatherClient.fetchNetworkLocation()
+        val place = result.data ?: run {
+            Log.w(TAG, "网络定位失败：${result.error}")
+            return null
+        }
+        val fix = Fix(round(place.lat), round(place.lon), "network-ip:" + (place.city ?: "?"))
+        remember(context, fix) // 记住它，否则每个采集周期都会重复问一次网络
+        return fix
+    }
+
+    /**
+     * 采集周期里的**静默刷新**：试一次定位（默认 100 秒），失败就沿用历史坐标。
      *
      * 这是主人定的策略——每 30 分钟采数据时顺带更新一次位置，但不为此打断任何东西：
      * 拿到新的就用新的，拿不到就继续用上次真取到过的那个，**绝不因此停止采集**。
      * 与设置流程里那次"拿到才继续"是两回事：第一次必须确知在哪，之后只需保持新鲜。
      */
-    suspend fun refreshOrRemember(context: Context, timeoutMs: Long = 30_000L): Fix? =
-        acquire(context, budgetMs = timeoutMs) ?: recalled(context)?.also {
-            Log.i(TAG, "静默刷新未成功，沿用历史坐标：${it.source}")
-        }
+    suspend fun refreshOrRemember(context: Context, timeoutMs: Long = 100_000L): Fix? =
+        acquire(context, budgetMs = timeoutMs)
+            ?: recalled(context)?.also { Log.i(TAG, "静默刷新未成功，沿用历史坐标：${it.source}") }
+            // 连历史都没有（还没设置过就自己跑起来了）→ 问一次网络。
+            // 拿到就会被记住，所以这条路径最多走一次。
+            ?: networkFix(context)
 
     /** 请求一次定位更新，拿到第一个就撤监听。用老 API 是为了 minSdk 27 也走得通。 */
     private suspend fun singleUpdate(manager: LocationManager, provider: String): Location? =
