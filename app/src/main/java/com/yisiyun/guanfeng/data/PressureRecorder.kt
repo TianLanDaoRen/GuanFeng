@@ -7,6 +7,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.util.Log
 import com.yisiyun.guanfeng.core.HourAccumulator
+import com.yisiyun.guanfeng.core.backfillCarriedOver
 import com.yisiyun.guanfeng.core.WeatherEpisode
 import com.yisiyun.guanfeng.core.WeatherEpisodeTracker
 import com.yisiyun.guanfeng.core.WeatherRule
@@ -323,6 +324,21 @@ object PressureRecorder {
                 } else {
                     Log.i(TAG, "天气过程快照已过时（${ageMs / 60000} 分钟），丢弃")
                 }
+            }
+
+            // 【小时归档的补齐】把"本次启动前、且属于当前这个小时"的样本先喂进累加器。
+            // 完整理由与取舍写在 backfillCarriedOver 的注释里（含真机实证的 545/720）。
+            val currentHourStartMs = (startedAtMs / 3_600_000L) * 3_600_000L
+            val backfill = hourAccumulator.backfillCarriedOver(
+                samples = restored,
+                currentHourStartMs = currentHourStartMs,
+                elevationOffsetHpa = elevationOffsetHpa,
+            )
+            backfill.completedRows.forEach { completed ->
+                appContext?.let { HourlyArchive.append(it, completed) }
+            }
+            if (backfill.fedSamples > 0) {
+                Log.i(TAG, "小时归档补齐：启动前本小时已有 ${backfill.fedSamples} 个样本")
             }
 
             // 光照趋势回填：读最近 10 分钟的历史读数，趋势立刻可用（不必再等 10 分钟）

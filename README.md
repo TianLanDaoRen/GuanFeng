@@ -174,8 +174,12 @@ tools/
 
 | 尺度 | 节奏 | 用途 |
 |---|---|---|
-| 实时 | 2 秒 | 界面上的「此刻」读数（气压 / 心率 / 腕温 / 光照）。不喂引擎、不写盘 |
-| 样本 | 15 秒 | 聚合后喂引擎并落盘。3 小时窗口 = 720 个样本，落盘约 5760 行/天 |
+| 实时 | 2 秒（`LIVE_TICK_MS`） | 界面上的「此刻」读数（气压 / 心率 / 腕温 / 光照）。不喂引擎、不写盘 |
+| 样本 | **5 秒**（`SAMPLE_INTERVAL_MS`） | 聚合后喂引擎并落盘。3 小时窗口 = **2160 个样本**，落盘约 **1.7 万行/天**（≈2 MB） |
+
+> 这张表原写作「15 秒 / 720 个样本 / 5760 行」，是 15 秒采样年代的旧值，
+> 2026-09-11 核对代码时改正。**满勤 720 是"每小时"，不是"3 小时"**——
+> 12 个/分钟 × 60 分钟 = 720，这一点在排查小时归档缺口时是判据。
 
 聚合口径三路各不相同：气压取**中位数**（抗单点尖峰）、垂直加速度取**峰值**
 （取平均会让抬腕与电梯脉冲消失）、步数**求和**。
@@ -189,21 +193,39 @@ tools/
 没有数据，把空洞两端的样本接起来做回归会算出一段根本不存在的趋势。
 **宁可窗口短一点，也不要跨空洞拟合。**
 
+**续接之外还要补一条（2026-09-11 补）**：小时归档的累加器也活在内存里，
+重启会让**当前这一小时已累积的部分**从 `hourly.csv` 里消失。实测 22:14 重启后，
+22:00 那行只有 **545/720** 个样本。现在启动时会用刚回填的样本把本小时补齐
+（`backfillCarriedOver`，纯函数、有单测），并在日志里留一行
+`小时归档补齐：启动前本小时已有 N 个样本` 供事后核对。
+
 ### 落盘
 
-`CsvSessionLogger` 每次应用启动生成一个独立文件：
+**单一文件**：`guanfeng_samples.csv`（每次启动不再新建文件，见 9.2）。
+超过 30 MB 时丢掉最旧的行、保留最近 25 MB——因此原始明细只能回溯约两周，
+**长期趋势必须读 `hourly.csv`**。
 
 ```
-/sdcard/Android/data/com.yisiyun.guanfeng/files/guanfeng_<yyyyMMdd_HHmmss>.csv
+/sdcard/Android/data/com.yisiyun.guanfeng/files/guanfeng_samples.csv
 ```
 
 - 用 `getExternalFilesDir(null)` → **可直接 `adb pull`，不需要 `run-as`**，不受分区存储限制
 - **每行即时追加**，不是退出时才写 → 进程被杀也只出现"断档"而不丢数据
 - 断档可由时间戳列直接识别（相邻样本间隔 > 3× 采样周期）
 
-列：`timestamp_ms, clock, pressure_hpa, vertical_accel, steps, rate_hpa_per_hour,
+列（以真机拉到的文件为准，2026-09-11 核对）：
+
+```
+timestamp_ms, clock, pressure_hpa, vertical_accel, steps, rate_hpa_per_hour,
 delta_hpa_3h, grade, weather_samples, elevation_events, elevation_meters,
-r_squared, window_minutes, coverage_pct, confidence`
+r_squared, window_minutes, coverage_pct, confidence,
+resting_heart_rate_bpm, light_delta_10min, weather_pressure_hpa, light_lux,
+vertical_displacement_m
+```
+
+**注意 `steps` 列**：它曾长期全为 0——因为 `ACTIVITY_RECOGNITION` 只在清单里声明、
+从没在运行时申请，计步传感器注册被 SensorService 直接拒绝（见 9.11 末尾）。
+已于 2026-09-11 修复，但修复之前的数据这一列不可用。
 
 ### 离线复盘
 
@@ -259,7 +281,7 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 ./gradlew :app:testDebugUnitTest
 ```
 
-全部 **93 个用例**在 JVM 上运行、不依赖手表，分十七个测试类：
+全部 **94 个用例**在 JVM 上运行、不依赖手表，分十七个测试类：
 
 | 测试类 | 用例 | 覆盖什么 |
 |---|---|---|
@@ -271,7 +293,7 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 | `PressureRollupTest` | 3 | 小时级降采样：整点取整、同小时折叠、跨小时分桶并排序 |
 | `AssociationAnalyzerTest` | 6 | 关联统计：**本地日界不按 UTC 切**、大变化日判定、无打卡时不编造比例 |
 | `CheckInHistoryTest` | 4 | 打卡解析：按表头定位列、坏行跳过、缺列不崩 |
-| `HourlyArchiveModelTest` | 5 | 小时归档累加：整点滚动必须先交出上一小时、缺失数据留 null、**腕温取中位数而非均值** |
+| `HourlyArchiveModelTest` | 6 | 小时归档累加：整点滚动必须先交出上一小时、缺失数据留 null、**腕温取中位数而非均值** |
 | `HourlyArchiveTest` | 6 | 归档解析与去重（同整点跨重启重复落盘兜底）、体感概要取中位数、空数据不冒充 |
 | `MarkdownLiteTest` | 7 | 极简 Markdown：**剥掉服务端标语帧**、四类块、粗体拆分、中文硬换行不补空格（夹具用真实接口返回原样文本） |
 | `AiDigestTest` | 7 | 上报摘要：**备注原文必须带上**（那才是可分析的细节）、两段口径、提示词约束、引号转义 |

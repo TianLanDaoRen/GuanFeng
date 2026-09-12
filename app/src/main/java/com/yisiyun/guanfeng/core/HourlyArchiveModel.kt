@@ -127,3 +127,62 @@ class HourAccumulator {
         lightValues.clear()
     }
 }
+
+/** [backfillCarriedOver] 的结果。 */
+data class BackfillResult(
+    /** 实际补进累加器的样本条数（0 表示没有可补的）。 */
+    val fedSamples: Int,
+    /**
+     * 补齐过程中被滚动出来的完整小时行。
+     *
+     * 按构造**正常情况下一定是空的**（补进来的样本全都属于当前小时）。
+     * 之所以还要把它交回调用方，是因为"理论上不可能"正是往年丢数据的常见借口——
+     * 万一以后有人改了过滤条件，这一行至少会被落盘，而不是无声消失。
+     */
+    val completedRows: List<HourlyRow>,
+)
+
+/**
+ * 启动时的归档补齐：把"本次启动前、且属于 [currentHourStartMs] 这个小时"的样本
+ * 先喂进累加器，让整点滚动出的那一行把重启前的那段也算进去。
+ *
+ * ## 为什么必须有它（真机实证）
+ *
+ * 累加器活在内存里，进程一重启就清零，于是重启前那一小段**从归档里永久消失**。
+ * 实测：22:14 重启之后，`hourly.csv` 里 22:00 那行只有 **545/720** 个样本，
+ * 缺的正是 22:00–22:14 这 14 分钟（满勤 720 = 60 分钟 × 12 个/分钟）。
+ * 归档是长期趋势与 AI 报告的唯一数据源，缺一段**不会报错**，只会悄悄改变结论。
+ *
+ * ## 两个刻意的取舍
+ *
+ * 1. **天气分量用 `原始气压 − 累计高度偏移` 还原**，而不是从 CSV 读 `weather_pressure_hpa`。
+ *    因为恢复样本用的 [PressureSample] 根本不带那一列；而高度偏移是 5 分钟落一次盘的，
+ *    最多陈旧 5 分钟，且只在检出竖直位移时才变，对"一小时的平均气压"足够。
+ * 2. **体感两列留空**（瞬时心率、腕温在原始 CSV 里没有）。宁可让这一小时的心率/腕温
+ *    由重启后的样本决定，也不拿 0 或旧值冒充——"看起来有数据"比"没有数据"更危险。
+ *
+ * 抽成纯函数（而不是留在采集器里）是为了能在 JVM 上钉住：
+ * 这是"重启就丢一段"的唯一防线，而"我写了但没人调用"是真实发生过的失败模式。
+ *
+ * @return 补进去的条数，以及（正常为空的）被滚动出来的整点行。
+ */
+fun HourAccumulator.backfillCarriedOver(
+    samples: List<PressureSample>,
+    currentHourStartMs: Long,
+    elevationOffsetHpa: Float,
+): BackfillResult {
+    val carried = samples.filter { it.timestampMs >= currentHourStartMs }
+    val completed = ArrayList<HourlyRow>(0)
+    carried.forEach { sample ->
+        add(
+            timestampMs = sample.timestampMs,
+            weatherHpa = sample.pressureHpa - elevationOffsetHpa,
+            rawHpa = sample.pressureHpa,
+            heartRateBpm = null,
+            restingHeartRateBpm = null,
+            wristTempC = null,
+            lightLux = null,
+        )?.let { completed += it }
+    }
+    return BackfillResult(fedSamples = carried.size, completedRows = completed)
+}

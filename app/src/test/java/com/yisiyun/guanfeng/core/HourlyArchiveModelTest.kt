@@ -108,4 +108,53 @@ class HourlyArchiveModelTest {
         assertEquals(1000f, row.weatherAvgHpa, 0.01f)
         assertEquals("原始读数要留档，便于回查解耦是否正确", 1008f, row.rawAvgHpa, 0.01f)
     }
+
+    @Test
+    fun `进程重启后回填本小时样本_那一行仍是完整的 720`() {
+        // 真机实证的缺陷：22:14 重启后，22:00 那行只落了 545/720 个样本，
+        // 少掉的正是重启前的 14 分钟——不会报错，只会悄悄改变长期结论。
+        //
+        // 这里直接走真实路径：backfillCarriedOver（启动时补） + 采集器继续喂。
+        val beforeRestart = 168 // 14 分钟 × 12 个/分钟
+        val total = 720
+
+        // 启动前的样本：原始气压 1010，高度偏移 8 → 还原出的天气分量是 1002
+        val restored = (0 until beforeRestart).map { i ->
+            PressureSample(timestampMs = base + i * 5_000L, pressureHpa = 1010f)
+        }
+        // 不属于本小时的样本：必须被过滤掉，不能污染
+        val previousHour = listOf(
+            PressureSample(timestampMs = base - 60_000L, pressureHpa = 9999f),
+        )
+
+        val accumulator = HourAccumulator()
+        val result = accumulator.backfillCarriedOver(
+            samples = previousHour + restored,
+            currentHourStartMs = base,
+            elevationOffsetHpa = 8f,
+        )
+
+        assertEquals("上一小时的样本不得补进来", beforeRestart, result.fedSamples)
+        assertTrue("正常不该有整点行被滚出来", result.completedRows.isEmpty())
+        assertEquals(beforeRestart, accumulator.snapshot()!!.samples)
+
+        // 重启后的样本接着喂，一路到下一小时
+        var completed: HourlyRow? = null
+        for (i in beforeRestart until total) {
+            completed = accumulator.feed(i * 5_000L, 1002f, hr = 62f) ?: completed
+        }
+        completed = accumulator.feed(hour, 1000f) ?: completed
+
+        assertNotNull(completed)
+        assertEquals("重启前后必须合成完整的一小时，而不是各出一行", total, completed!!.samples)
+        assertEquals("回填段用的是 pressureHpa − offset", 1002f, completed.weatherAvgHpa, 0.01f)
+        assertEquals("原始读数照样留档", 1010f, completed.rawAvgHpa, 0.01f)
+        // 体感在回填段是空的（原始 CSV 里没有），只能由重启后的样本决定——不是 0
+        assertEquals(62f, completed.heartRateAvg!!, 0.01f)
+        assertEquals(
+            "不得因为回填段没有腕温就写出 0℃",
+            null,
+            completed.wristTempAvg,
+        )
+    }
 }
