@@ -281,6 +281,24 @@ object PressureRecorder {
             persisted.restingHeartRateBpm?.let { restingCandidates += it }
             Log.i(TAG, "恢复状态：静息基线=${persisted.restingHeartRateBpm} 高度偏移=${persisted.elevationOffsetHpa}")
 
+            // 天气过程锁存：**这才是「挂上就不摘」能扛住进程被回收的关键**。
+            // 没有它，重启后第一帧样本就把当前气压当参照点，一场正在下的雨会被忘成「平稳」。
+            // 过时判定：停机超过 RECENT_FALL_WINDOW_MS（6 小时）的旧账不恢复——
+            // 隔夜再打开应用时，昨天那场雨不该继续算数。
+            persisted.episode?.let { saved ->
+                val ageMs = System.currentTimeMillis() - persisted.episodeWrittenMs
+                if (persisted.episodeWrittenMs > 0L && ageMs <= RECENT_FALL_WINDOW_MS) {
+                    episodeTracker.restore(saved)
+                    Log.i(
+                        TAG,
+                        "恢复天气过程：active=${saved.active} 降幅=${"%.2f".format(saved.dropHpa)} " +
+                            "快照年龄=${ageMs / 60000} 分钟",
+                    )
+                } else {
+                    Log.i(TAG, "天气过程快照已过时（${ageMs / 60000} 分钟），丢弃")
+                }
+            }
+
             // 光照趋势回填：读最近 10 分钟的历史读数，趋势立刻可用（不必再等 10 分钟）
             val since = startedAtMs - LIGHT_TREND_WINDOW_MS
             val seededLight = SessionHistory.loadRecentLight(applicationContext, since, startedAtMs)
@@ -347,6 +365,9 @@ object PressureRecorder {
                 context = context,
                 restingHeartRateBpm = restingBaseline,
                 elevationOffsetHpa = 0f,
+                // 必须带上当前过程状态：这个方法只重置高度基准，
+                // 不该顺手把「正在下雨」的锁存一起抹掉
+                episode = episodeTracker.current(),
             )
         }
         _state.value = _state.value.copy(weatherPressureHpa = _state.value.pressureHpa)
@@ -592,6 +613,7 @@ object PressureRecorder {
                         context = context,
                         restingHeartRateBpm = restingBaseline,
                         elevationOffsetHpa = elevationOffsetHpa,
+                        episode = episode,
                     )
                     // 耗电自记录：电量 + 本进程 CPU 时间，供事后归因
                     PowerLogger.append(

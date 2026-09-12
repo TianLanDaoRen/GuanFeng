@@ -259,7 +259,7 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 ./gradlew :app:testDebugUnitTest
 ```
 
-全部 **91 个用例**在 JVM 上运行、不依赖手表，分十六个测试类：
+全部 **93 个用例**在 JVM 上运行、不依赖手表，分十七个测试类：
 
 | 测试类 | 用例 | 覆盖什么 |
 |---|---|---|
@@ -276,7 +276,7 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 | `MarkdownLiteTest` | 7 | 极简 Markdown：**剥掉服务端标语帧**、四类块、粗体拆分、中文硬换行不补空格（夹具用真实接口返回原样文本） |
 | `AiDigestTest` | 7 | 上报摘要：**备注原文必须带上**（那才是可分析的细节）、两段口径、提示词约束、引号转义 |
 | `CorroborationTest` | 9 | 体感佐证：**只有光照可升档**、气压未降时不许升档、运动中不给体感提示、未知不可被升成已知 |
-| `WeatherEpisodeTrackerTest` | 7 | **天气过程状态机**：越过降幅门限进入、小幅抖动不进入、回升则解除、**持续 12 小时不忘**、**雨时下时停零翻转**、解除后再降开新一轮 |
+| `WeatherEpisodeTrackerTest` | 9 | **天气过程状态机**：越过降幅门限进入、小幅抖动不进入、回升则解除、**持续 12 小时不忘**、**雨时下时停零翻转**、解除后再降开新一轮、**锁存快照恢复后继续判定** |
 | `WeatherRuleNetChangeTest` | 4 | 先降后平的边界：必须给转坏结论 / 净量小时给已转平稳 / 振荡仍不给结论 / 路径效率能区分两者 |
 | `PublicAiLiveCheckTest` | 1 | **真连公共接口**跑通请求形状与返回解析（离线或命中限流时自动跳过） |
 | `ExampleUnitTest` | 1 | 模板占位 |
@@ -447,6 +447,17 @@ adb shell dumpsys batterystats --charged com.yisiyun.guanfeng
 有一条"120 分钟内零次翻转"的测试守着这个性质。
 
 状态机也是气象仪器的通行做法：风暴警报一旦挂上就锁存，直到气压回升才摘掉。
+
+**锁存必须落盘（2026-09-11 补）**。这条最初是漏的：状态机只活在内存里，
+进程一被回收就清零，重启后第一帧样本把当时气压当成参照最高点，
+于是"已经降了 3 hPa、雨正在下"被彻底忘掉，又回到「平稳」——
+与"挂上就不摘"直接矛盾。手表可用内存很小（实测 `Free` 最低只剩 24 MB），
+前台服务被回收是常态，所以这不是理论风险。
+
+现在 `active / peak / min / start_ms / drop` 一并写进 `recorder_state.txt`
+（与高度偏移同一份文件、同一个 5 分钟落盘节奏），启动时读回。
+带一条过时判定：快照年龄超过 6 小时就丢弃——隔夜再打开应用，
+昨天那场雨不该继续算数。
 
 ### 9.7 天气分量与高度解耦（长视图）
 引擎只做窗口内解耦，且它是**相对于窗口起点**的；调用方必须从每步回报里

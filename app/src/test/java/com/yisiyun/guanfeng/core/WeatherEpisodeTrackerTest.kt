@@ -120,4 +120,34 @@ class WeatherEpisodeTrackerTest {
 
         assertFalse("应当以抬高的参照点计算降幅", state.active)
     }
+
+    @Test
+    fun `锁存状态可持久化并恢复`() {
+        // 这是"挂上就不摘"能否扛住进程被回收的关键：快照存下来，重启后装回去。
+        val original = WeatherEpisodeTracker()
+        feed(original, listOf(1010f, 1008.5f, 1008f))
+        val snapshot = original.current()
+        assertTrue(snapshot.active)
+
+        val restored = WeatherEpisodeTracker()
+        restored.restore(snapshot)
+
+        val after = restored.current()
+        assertTrue("恢复后必须仍然是「过程中」", after.active)
+        assertEquals(-2f, after.dropHpa, 0.05f)
+        assertEquals(1008f, after.minHpa, 0.05f)
+
+        // 重启后继续喂：从最低点回升 1.5 就应当解除，说明 min 也被正确带回来了
+        val cleared = restored.add(60 * minute, 1009.5f)
+        assertFalse("恢复的最低点必须参与解除判定", cleared.active)
+    }
+
+    @Test
+    fun `空快照恢复后不得凭空报警`() {
+        val tracker = WeatherEpisodeTracker()
+        tracker.restore(WeatherEpisode(false, 0f, 0L, 0f, 0f, null))
+
+        assertFalse(tracker.current().active)
+        assertEquals(0f, tracker.current().peakHpa, 0.001f)
+    }
 }

@@ -2,6 +2,7 @@ package com.yisiyun.guanfeng.log
 
 import android.content.Context
 import com.yisiyun.guanfeng.core.PressureSample
+import com.yisiyun.guanfeng.core.WeatherEpisode
 import java.io.File
 
 /**
@@ -33,6 +34,15 @@ object SessionHistory {
     private const val RECORDER_STATE_FILE = "recorder_state.txt"
     private const val KEY_RESTING_HR = "resting_hr"
     private const val KEY_ELEVATION_OFFSET = "elevation_offset_hpa"
+
+    // 天气过程状态机的锁存字段。见 WeatherEpisodeTracker.restore() 的说明：
+    // 没有这几个键，进程一被回收，"正在下雨"就会被忘成「平稳」。
+    private const val KEY_EPISODE_ACTIVE = "episode_active"
+    private const val KEY_EPISODE_PEAK = "episode_peak_hpa"
+    private const val KEY_EPISODE_MIN = "episode_min_hpa"
+    private const val KEY_EPISODE_START_MS = "episode_start_ms"
+    private const val KEY_EPISODE_DROP = "episode_drop_hpa"
+    private const val KEY_EPISODE_WRITTEN_MS = "episode_written_ms"
 
     /**
      * 纯解析：CSV 文本 → 样本列表。
@@ -233,10 +243,14 @@ object SessionHistory {
         }.getOrElse { emptyList() }
     }
 
-    /** 跨会话需要保留的一点点状态：静息心率基线，以及累计的高度偏移。 */
+    /** 跨会话需要保留的一点点状态：静息心率基线、累计高度偏移，以及天气过程锁存。 */
     data class RecorderPersistedState(
         val restingHeartRateBpm: Float?,
         val elevationOffsetHpa: Float,
+        /** 天气过程状态机的快照；没有记录过时为 null。 */
+        val episode: WeatherEpisode? = null,
+        /** 快照的写入时刻，用来判断它是否已经过时。 */
+        val episodeWrittenMs: Long = 0L,
     )
 
     /**
@@ -253,15 +267,41 @@ object SessionHistory {
         return runCatching {
             var resting: Float? = null
             var offset = 0f
+            var active = false
+            var peak = 0f
+            var minHpa = 0f
+            var startMs = 0L
+            var drop = 0f
+            var writtenMs = 0L
+            var sawEpisode = false
             file.readLines().forEach { line ->
                 val parts = line.split('=')
                 if (parts.size != 2) return@forEach
+                val value = parts[1].trim()
                 when (parts[0].trim()) {
-                    KEY_RESTING_HR -> resting = parts[1].trim().toFloatOrNull()
-                    KEY_ELEVATION_OFFSET -> offset = parts[1].trim().toFloatOrNull() ?: 0f
+                    KEY_RESTING_HR -> resting = value.toFloatOrNull()
+                    KEY_ELEVATION_OFFSET -> offset = value.toFloatOrNull() ?: 0f
+                    KEY_EPISODE_ACTIVE -> { active = value == "1"; sawEpisode = true }
+                    KEY_EPISODE_PEAK -> peak = value.toFloatOrNull() ?: 0f
+                    KEY_EPISODE_MIN -> minHpa = value.toFloatOrNull() ?: 0f
+                    KEY_EPISODE_START_MS -> startMs = value.toLongOrNull() ?: 0L
+                    KEY_EPISODE_DROP -> drop = value.toFloatOrNull() ?: 0f
+                    KEY_EPISODE_WRITTEN_MS -> writtenMs = value.toLongOrNull() ?: 0L
                 }
             }
-            RecorderPersistedState(resting, offset)
+            val episode = if (sawEpisode) {
+                WeatherEpisode(
+                    active = active,
+                    dropHpa = drop,
+                    startMs = startMs,
+                    minHpa = minHpa,
+                    peakHpa = peak,
+                    clearedRiseHpa = null,
+                )
+            } else {
+                null
+            }
+            RecorderPersistedState(resting, offset, episode, writtenMs)
         }.getOrElse { RecorderPersistedState(null, 0f) }
     }
 
@@ -269,12 +309,21 @@ object SessionHistory {
         context: Context,
         restingHeartRateBpm: Float?,
         elevationOffsetHpa: Float,
+        episode: WeatherEpisode? = null,
     ): Boolean = runCatching {
         val directory = context.getExternalFilesDir(null) ?: context.filesDir
         val text = buildString {
             append(KEY_RESTING_HR).append('=')
             append(restingHeartRateBpm?.let { "%.1f".format(it) } ?: "").append('\n')
             append(KEY_ELEVATION_OFFSET).append('=').append("%.3f".format(elevationOffsetHpa)).append('\n')
+            if (episode != null) {
+                append(KEY_EPISODE_ACTIVE).append('=').append(if (episode.active) "1" else "0").append('\n')
+                append(KEY_EPISODE_PEAK).append('=').append("%.3f".format(episode.peakHpa)).append('\n')
+                append(KEY_EPISODE_MIN).append('=').append("%.3f".format(episode.minHpa)).append('\n')
+                append(KEY_EPISODE_START_MS).append('=').append(episode.startMs).append('\n')
+                append(KEY_EPISODE_DROP).append('=').append("%.3f".format(episode.dropHpa)).append('\n')
+                append(KEY_EPISODE_WRITTEN_MS).append('=').append(System.currentTimeMillis()).append('\n')
+            }
         }
         File(directory, RECORDER_STATE_FILE).writeText(text)
         true

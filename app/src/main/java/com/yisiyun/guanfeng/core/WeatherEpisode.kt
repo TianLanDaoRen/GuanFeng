@@ -71,16 +71,41 @@ class WeatherEpisodeTracker(
     private var lastDrop = 0f
     private var lastClearedRise: Float? = null
 
-    fun current(nowMs: Long = System.currentTimeMillis()): WeatherEpisode = WeatherEpisode(
+    fun current(): WeatherEpisode = WeatherEpisode(
         active = active,
         dropHpa = lastDrop,
         startMs = startMs,
         minHpa = if (min.isNaN()) 0f else min,
         peakHpa = if (peak.isNaN()) 0f else peak,
         clearedRiseHpa = lastClearedRise,
-    ).copy(startMs = if (active) startMs else startMs).let {
-        // durationMs 用传入的 nowMs 计算，避免测试里依赖真实时钟
-        it
+    )
+
+    /**
+     * 从持久化状态恢复——**这是「锁存」能跨进程存活的唯一途径**。
+     *
+     * 为什么必须有：状态机原本只活在内存里。手表的可用内存很小
+     * （实测 Free 最低只剩 24 MB），前台服务被系统回收是常态；
+     * 每次重启后 [peak] 清空，下一帧样本就把当前气压当成参照最高点，
+     * 于是"已经降了 3 hPa、雨正在下"这件事被彻底忘掉，重新回到「平稳」。
+     * 这与状态机的立意（挂上就不摘、直到回升）直接矛盾，所以状态必须落盘。
+     *
+     * 用 [WeatherEpisode] 本身作为快照类型，不另造结构：它已经带齐了
+     * active / peak / min / startMs 四个字段，再多一个类型只是重复。
+     *
+     * @param clearedRiseHpa 只用于复盘显示，恢复时保留即可，不参与判定。
+     */
+    fun restore(episode: WeatherEpisode) {
+        // peak/min 为 0 说明是"从未跟踪过"的空状态（真实气压约 1000 hPa，不可能是 0）
+        if (episode.peakHpa <= 0f || episode.minHpa <= 0f) {
+            reset()
+            return
+        }
+        active = episode.active
+        peak = episode.peakHpa
+        min = episode.minHpa
+        startMs = episode.startMs
+        lastDrop = episode.dropHpa
+        lastClearedRise = episode.clearedRiseHpa
     }
 
     /** 喂入一个**天气分量**气压（已解耦高度）。 */
@@ -89,7 +114,7 @@ class WeatherEpisodeTracker(
             peak = pressureHpa
             min = pressureHpa
             startMs = timestampMs
-            return current(timestampMs)
+            return current()
         }
 
         if (!active) {
@@ -105,7 +130,7 @@ class WeatherEpisodeTracker(
                 min = pressureHpa
                 lastDrop = drop
             }
-            return current(timestampMs)
+            return current()
         }
 
         // 过程之中：更新最低点；只看"自最低点回升了多少"，与时间无关
@@ -121,7 +146,7 @@ class WeatherEpisodeTracker(
             startMs = timestampMs
             lastDrop = 0f
         }
-        return current(timestampMs)
+        return current()
     }
 
     /** 换气/重启时重置（跨会话续接由调用方决定是否允许）。 */
