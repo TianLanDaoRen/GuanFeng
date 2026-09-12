@@ -46,6 +46,8 @@ import com.yisiyun.guanfeng.core.HourlyBucket
 import com.yisiyun.guanfeng.data.CheckInSignal
 import com.yisiyun.guanfeng.data.PressureRecorder
 import com.yisiyun.guanfeng.data.RecorderState
+import com.yisiyun.guanfeng.ui.components.PageHeader
+import com.yisiyun.guanfeng.ui.components.SUBTITLE_GRAY
 import com.yisiyun.guanfeng.log.CheckInHistory
 import com.yisiyun.guanfeng.log.HourlyArchive
 import com.yisiyun.guanfeng.log.SessionHistory
@@ -231,21 +233,13 @@ fun AssociationPage(state: RecorderState) {
         ) {
             // 标题原为「关联」——名字是我起的，它说明不了这一页在干什么。
             // 这一页真正做的事是：把体感打卡的点叠到气压曲线上，看两者有没有关系。
-            // 写成「气压 × 体感」，与第二屏的「环境 × 身体」用同一种句式。
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("气压 × 体感", color = Color(0xFFB79CE8), fontSize = 11.sp, maxLines = 1)
-                Spacer(Modifier.width(6.dp))
-                // 副标题吃剩余宽度、贴右：标题永远不可能被挤出去。
-                // 这一页已经因为算错横向预算把「生成 AI 报告」顶出过屏幕一次，不再靠手算字数。
-                Text(
-                    text = "曲线 24h · 统计近 $PERIOD_DAYS 天",
-                    color = Color(0xFF6E6E6E),
-                    fontSize = 7.sp,
-                    maxLines = 1,
-                    textAlign = TextAlign.End,
-                    modifier = Modifier.weight(1f),
-                )
-            }
+            // 写成「气压 × 体感」，与第二屏的「环境 × 身体」同一种句式。
+            // 版式即 PageHeader 的样板（其余各页都向它统一）。
+            PageHeader(
+                title = "气压 × 体感",
+                titleColor = Color(0xFFB79CE8),
+                subtitle = "曲线 24h · 统计近 $PERIOD_DAYS 天",
+            )
 
             if (loading || current == null) {
                 Text("汇总中…", color = Color(0xFF8A8A8A), fontSize = 10.sp)

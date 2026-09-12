@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yisiyun.guanfeng.data.RecorderState
+import com.yisiyun.guanfeng.ui.components.PageHeader
 
 /**
  * 第二屏 · 体感：环境侧与身体侧并置。
@@ -37,18 +38,18 @@ fun BodyPage(state: RecorderState) {
             .padding(horizontal = 14.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        // 与打卡页（橙）、记录页（绿）一致：每页给一个可识别的标题，体感用蓝
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("体感", color = Color(0xFF6FB4E8), fontSize = 11.sp)
-            Spacer(Modifier.fillMaxWidth(0.12f))
-            Text("环境 × 身体", color = Color(0xFF6E6E6E), fontSize = 8.sp)
-        }
+        // 版式统一走 PageHeader；各页主标题保留自己的颜色（体感用蓝）
+        PageHeader(
+            title = "体感",
+            titleColor = Color(0xFF6FB4E8),
+            subtitle = "环境 × 身体",
+        )
 
         ReadingRow(
-            label = "实时心率",
+            // 【文案】原为「实时心率」。心率改成脉冲采样后（每 10 分钟开 20 秒），
+            // 这个数最坏会陈旧十分钟——继续叫「实时」就是名不副实。
+            // 一个仪表说"实时"却给十分钟前的读数，比没有读数更坏。
+            label = "最近心率",
             value = state.heartRateBpm?.let { "%.0f".format(it) } ?: "—",
             unit = "bpm",
             color = Color(0xFFFF8A8A),

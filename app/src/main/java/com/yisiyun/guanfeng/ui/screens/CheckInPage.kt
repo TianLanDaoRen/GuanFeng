@@ -32,7 +32,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yisiyun.guanfeng.data.CheckInLogger
 import com.yisiyun.guanfeng.data.CheckInSignal
+import com.yisiyun.guanfeng.core.COMFORT_TAG
 import com.yisiyun.guanfeng.data.RecorderState
+import com.yisiyun.guanfeng.ui.components.PageHeader
+import com.yisiyun.guanfeng.ui.components.SUBTITLE_GRAY
 import kotlinx.coroutines.delay
 
 /**
@@ -46,18 +49,25 @@ import kotlinx.coroutines.delay
  * **颈肩部位的疼痛**、关节与肌肉疼痛、乏力、心悸与血压波动、情绪变化等；
  * 另有资料把它们归为脑型 / 心型 / 无力神经型 / 关节肌肉型等症候群。
  *
- * 本屏取六个高频且可在腕上快速辨认的代表项，每个都对应一个症候群：
- *   脑型：头痛、头晕
- *   关节肌肉型：颈肩、关节
- *   无力神经型：疲劳、睡眠差
- * （心型的心悸/气短留给「备注」自由输入；想改清单只需动下面这一行常量。）
+ * 2026-09-12 按主人要求调整（清单见下方 [CHECK_IN_TAGS]）：
+ *   · 「头痛」与「头晕」合并成「**头部**」——都是头部的感受，分开记反而让人犹豫点哪个；
+ *   · 新增「**舒适**」——这一页已从「不适打卡」改名「体感打卡」，
+ *     就不能只让人记坏消息。**感觉良好也是有价值的数据**（天然的对照组）。
  *
  * ## 交互
  * 标签、强度各选一次 → 按记录，正常路径两下手势完成；
  * 备注是可选路径（点输入框弹系统键盘），输入完点键盘自己的收起箭头再按记录。
  * 反馈直接占用标题行右侧，省一行高度——189×248 dp 上每一行都要算着用。
  */
-private val SYMPTOM_TAGS = listOf("头痛", "头晕", "颈肩", "关节", "疲劳", "睡眠差")
+
+/**
+ * 体感标签：2×3，仍是六个，**不占额外高度**——这一页每一行都是算着用的。
+ *
+ * 前五个是文献里的气象敏感症候群代表项（脑型 / 关节肌肉型 / 无力神经型），
+ * 最后一个 [COMFORT_TAG] 是**非症状**的对照组。
+ */
+private val CHECK_IN_TAGS = listOf("头部", "颈肩", "关节", "疲劳", "睡眠差", COMFORT_TAG)
+
 private val INTENSITIES = listOf("轻", "中", "重")
 
 private const val TAG = "GuanFengCheckIn"
@@ -67,7 +77,7 @@ fun CheckInPage(state: RecorderState) {
     val context = LocalContext.current
     val logger = remember { CheckInLogger(context) }
 
-    var selectedTag by remember { mutableStateOf(SYMPTOM_TAGS.first()) }
+    var selectedTag by remember { mutableStateOf(CHECK_IN_TAGS.first()) }
     var selectedIntensity by remember { mutableStateOf("中") }
     var note by remember { mutableStateOf("") }
     var todayCount by remember { mutableStateOf(logger.countToday()) }
@@ -86,19 +96,18 @@ fun CheckInPage(state: RecorderState) {
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("体感打卡", color = Color(0xFFF2C14E), fontSize = 11.sp)
-            Spacer(Modifier.fillMaxWidth(0.1f))
-            Text(
-                text = feedback ?: "今日 $todayCount 次",
-                color = if (feedback != null) Color(0xFF6EE7A8) else Color(0xFF7A7A7A),
-                fontSize = 8.sp,
-            )
-        }
+        // 版式统一走 PageHeader；主标题保留本页的橙色。
+        // 反馈（"已记录"等）占用副标题位，只在它出现时变色——这样不额外占一行高度。
+        PageHeader(
+            title = "体感打卡",
+            titleColor = Color(0xFFF2C14E),
+            subtitle = feedback ?: "今日 $todayCount 次",
+            subtitleColor = if (feedback != null) Color(0xFF6EE7A8) else SUBTITLE_GRAY,
+        )
 
-        // 症状：2×3，每个都对应一个文献症候群
+        // 体感标签：2×3。前五个是文献症候群，最后一个是「舒适」（对照组）
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            SYMPTOM_TAGS.chunked(2).forEach { pair ->
+            CHECK_IN_TAGS.chunked(2).forEach { pair ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),

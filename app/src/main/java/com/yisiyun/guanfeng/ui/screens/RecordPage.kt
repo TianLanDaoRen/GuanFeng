@@ -22,6 +22,8 @@ import com.yisiyun.guanfeng.core.TrendConfidence
 import com.yisiyun.guanfeng.core.WeatherRule
 import com.yisiyun.guanfeng.data.PressureRecorder
 import com.yisiyun.guanfeng.data.RecorderState
+import com.yisiyun.guanfeng.ui.components.PageHeader
+import com.yisiyun.guanfeng.ui.components.SUBTITLE_GRAY
 import com.yisiyun.guanfeng.log.WeatherObservation
 import com.yisiyun.guanfeng.service.TrendNotifier
 import kotlinx.coroutines.delay
@@ -63,19 +65,14 @@ fun RecordPage(state: RecorderState) {
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                text = if (state.recording) "记录中" else "已停止",
-                color = if (state.recording) Color(0xFF6EE7A8) else Color(0xFFFF7A6B),
-                fontSize = 13.sp,
-            )
-            Spacer(Modifier.fillMaxWidth(0.06f))
-            Text(
-                text = if (state.logHealthy) "落盘正常" else "写入异常",
-                color = if (state.logHealthy) Color(0xFF7A7A7A) else Color(0xFFFF7A6B),
-                fontSize = 8.sp,
-            )
-        }
+        // 版式统一走 PageHeader；主标题保留本页的动态色（记录中=绿 / 已停止=红），
+        // 副标题在写入异常时也变红——它是状态，不是普通说明。
+        PageHeader(
+            title = if (state.recording) "记录中" else "已停止",
+            titleColor = if (state.recording) Color(0xFF6EE7A8) else Color(0xFFFF7A6B),
+            subtitle = if (state.logHealthy) "落盘正常" else "写入异常",
+            subtitleColor = if (state.logHealthy) SUBTITLE_GRAY else Color(0xFFFF7A6B),
+        )
         Text("前台服务 + indicator 保活中", color = Color(0xFF5E5E5E), fontSize = 7.sp)
 
         Spacer(Modifier.height(4.dp))
