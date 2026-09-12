@@ -39,13 +39,13 @@ object WeatherCollector {
     private const val RETRY_INTERVAL_MS = 5L * 60L * 1000L
 
     /**
-     * 每个采集周期里静默刷新位置的预算（主人定 100 秒）。
+     * 每个采集周期里静默刷新位置的预算。
      *
-     * 为什么给到 100 秒这么长：GPS 冷启动在户外常要几十秒才出第一次定位，
-     * 给太短等于每轮都白试。而它是**静默**的——不挡界面、不影响传感器采样，
-     * 所以等得起；超时也只是沿用上次的坐标，没有任何代价。
+     * 与设置流程共用同一个 30 秒：主人实测下来"星况好时 30 秒够了，不好再等也没用"。
+     * 这个数字改小还有个额外好处——GPS 开机时长直接决定耗电，30 秒 × 每 30 分钟
+     * 约等于每小时 60 秒 GPS 开机，比 100 秒那版省七成。
      */
-    private const val SILENT_REFRESH_MS = 100_000L
+    private const val SILENT_REFRESH_MS = SiteLocation.GPS_TIMEOUT_MS
 
     private const val PREFS = "guanfeng_weather"
     private const val KEY_LAST_AT = "last_fetch_at"
@@ -100,7 +100,7 @@ object WeatherCollector {
         // 取坐标：**先静默刷新一次（30 秒），失败才回退到历史坐标**（主人定的策略）。
         // 与设置流程里那次"拿到才继续"不同：第一次必须确知在哪，之后只需保持新鲜，
         // 所以这里绝不因为刷新失败就放弃采集。
-        val fix = SiteLocation.refreshOrRemember(context, timeoutMs = SILENT_REFRESH_MS)
+        val fix = SiteLocation.refreshOrRemember(context, gpsTimeoutMs = SILENT_REFRESH_MS)
             ?: return finish(
                 context, nowMs,
                 Outcome(false, "取不到坐标（没有定位权限且无历史坐标）", 0, 0),

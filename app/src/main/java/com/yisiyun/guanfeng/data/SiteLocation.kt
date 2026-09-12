@@ -50,6 +50,16 @@ object SiteLocation {
     /** 坐标 + 它是怎么来的（落盘进 CSV，事后能看出位置有没有变过）。 */
     data class Fix(val lat: Double, val lon: Double, val source: String)
 
+    /**
+     * GPS 单次等待上限。主人定 30 秒，理由是实测出来的：
+     * **星况好时 30 秒足够锁上，星况不好再等也没用**——室内等 78 秒与等 30 秒结果一样。
+     * 与其耗着，不如早点落到下一步（网络推断或沿用上次坐标）。
+     */
+    const val GPS_TIMEOUT_MS = 30_000L
+
+    /** 网络定位（provider 存在时）的等待上限；不存在时它是瞬间返回的。 */
+    private const val NETWORK_TIMEOUT_MS = 8_000L
+
     /** 坐标的小数位。天气尺度用不到更多精度，粗一点反而更稳。 */
     private const val DECIMALS = 3
 
@@ -110,7 +120,11 @@ object SiteLocation {
      * 而采集本身（每 30 分钟）只读已记录的坐标，不会再碰 GPS。
      * 室内锁不上星是真实存在的，所以**超时后必须给明确的失败出口**，不能卡死。
      */
-    suspend fun acquire(context: Context, budgetMs: Long = 90_000L): Fix? {
+    suspend fun acquire(
+        context: Context,
+        gpsTimeoutMs: Long = GPS_TIMEOUT_MS,
+        networkTimeoutMs: Long = NETWORK_TIMEOUT_MS,
+    ): Fix? {
         // 先捡现成的：瞬时、零成本
         fromSystem(context)?.let {
             remember(context, it)
@@ -127,11 +141,11 @@ object SiteLocation {
 
         // **混合定位**：先走网络/Wi-Fi（室内也能用、通常几秒），再走 GPS（精确但要求见天）。
         // 网络那一路只吃 COARSE 权限，所以用户即便只给了粗定位，这条仍然可用。
-        val networkBudget = minOf(budgetMs / 2, 12_000L)
-        val gpsBudget = budgetMs - networkBudget
+        // 每个源给**各自**的超时，而不是从总预算里对半分——否则网络那一截会把 GPS 的
+        // 30 秒吃掉一半。本机没有 network provider 时它是瞬间返回的，不吃时间。
         val plan = listOf(
-            Triple(LocationManager.NETWORK_PROVIDER, networkBudget, hasPermission(context)),
-            Triple(LocationManager.GPS_PROVIDER, gpsBudget, hasFinePermission(context)),
+            Triple(LocationManager.NETWORK_PROVIDER, networkTimeoutMs, hasPermission(context)),
+            Triple(LocationManager.GPS_PROVIDER, gpsTimeoutMs, hasFinePermission(context)),
         )
 
         for ((provider, timeout, permitted) in plan) {
@@ -182,8 +196,8 @@ object SiteLocation {
      * 拿到新的就用新的，拿不到就继续用上次真取到过的那个，**绝不因此停止采集**。
      * 与设置流程里那次"拿到才继续"是两回事：第一次必须确知在哪，之后只需保持新鲜。
      */
-    suspend fun refreshOrRemember(context: Context, timeoutMs: Long = 100_000L): Fix? =
-        acquire(context, budgetMs = timeoutMs)
+    suspend fun refreshOrRemember(context: Context, gpsTimeoutMs: Long = GPS_TIMEOUT_MS): Fix? =
+        acquire(context, gpsTimeoutMs = gpsTimeoutMs)
             ?: recalled(context)?.also { Log.i(TAG, "静默刷新未成功，沿用历史坐标：${it.source}") }
             // 连历史都没有（还没设置过就自己跑起来了）→ 问一次网络。
             // 拿到就会被记住，所以这条路径最多走一次。
