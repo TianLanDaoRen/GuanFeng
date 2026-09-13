@@ -53,6 +53,9 @@ class WatchSessionService : Service() {
         startForeground(NOTIFICATION_ID, notification)
         // 采集交给单例，界面只是订阅方；服务活着，会话就连续。
         PressureRecorder.start(applicationContext)
+        // 文件开关的「N 分钟后测试提醒」（见 TestAlertSwitch）：只在启动时读一次盘。
+        // 预约存在 AlertState 里，兑现由上面的采样循环负责。
+        TestAlertSwitch.armFromFile(applicationContext)
         startNotificationUpdates()
         Log.i(TAG, "已进入前台并挂上 indicator")
         // 提醒发生时要立刻刷新 indicator（默认按行数分桶最快要几十秒），

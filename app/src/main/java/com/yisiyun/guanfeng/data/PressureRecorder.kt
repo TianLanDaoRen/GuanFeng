@@ -1110,8 +1110,11 @@ object PressureRecorder {
 
             // 预约的测试提醒：**由服务循环兑现**，走的是与真实提醒同一条路。
             // 这是为了回答"服务能不能调起震动"——用界面里的 delay 验不出来。
-            if (AlertState.consumeDelayedTest(now)) {
+            // 日志带上预约时的时长：文件开关既可能约 2 分钟也可能约 30 分钟，
+            // 事后回看日志必须能一眼分清这次验的是哪个量级。
+            AlertState.consumeDelayedTest(now)?.let { delayed ->
                 appContext?.let { TrendNotifier.triggerTestAlert(it) }
+                Log.i(TAG, "测试提醒（$delayed）已兑现")
             }
 
             // 主动提醒：转坏到「高」时发一条通知（声音与震动交给系统）。

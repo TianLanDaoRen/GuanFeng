@@ -208,6 +208,7 @@ fun AssociationPage(state: RecorderState) {
             val buffer = StringBuilder()
             var lastPublishMs = 0L
             val result = PublicAiClient.stream(
+                context = context,
                 systemPrompt = AiDigest.buildSystemInstruction(),
                 userContent = AiDigest.buildUserContent(
                     AiDigest.build(

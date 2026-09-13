@@ -203,6 +203,32 @@ private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
         )
     }
 
+    // 【不对称的一行】云量 + 风。
+    // 宽度按内容给：风的文字长（"西南 3 级"），云量短（"39%"），
+    // 所以风那格给 1.3 份、云量给 1 份 —— 之前每一行都是两个等宽格子，
+    // 结果长内容那格被挤、短内容那格白留一片。
+    Spacer(Modifier.height(6.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+        MetricCard(
+            label = "云量",
+            value = snapshot.cloudCover.toDoubleOrNull()?.let { "${(it * 100).toInt()}" } ?: "—",
+            unit = "%",
+            valueColor = Color(0xFFA9C7E8),
+            modifier = Modifier.weight(1f),
+        )
+        MetricCard(
+            label = "风",
+            value = buildString {
+                append(snapshot.windCompass.ifBlank { "—" }.uppercase())
+                val scale = snapshot.windScale.trim()
+                if (scale.isNotEmpty()) append(" ").append(scale).append(" 级")
+            },
+            unit = "",
+            valueColor = Color(0xFF8FE3C8),
+            modifier = Modifier.weight(1.3f),
+        )
+    }
+
     if (air != null && air.aqi.isNotBlank()) {
         Spacer(Modifier.height(6.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {

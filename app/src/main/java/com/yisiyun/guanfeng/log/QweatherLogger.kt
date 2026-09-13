@@ -470,6 +470,16 @@ object QweatherLogger {
         val pressureHpa: String,
         val humidity: String,
         val uvIndex: String,
+        /**
+         * 云量（0~1 的小数，CSV 原样字符串）与风。
+         *
+         * 为什么把这两个挑出来显示：云量是整份数据里**除紫外线外唯一直接描述天空**的量，
+         * 而风是这个应用的名字（观风）——气压短临看的是"风雨"，没有风这一格总像缺了一半。
+         * 它们在 CSV 里一直都在（`cloud_cover` / `wind_compass` / `wind_scale`），只是没被读出来。
+         */
+        val cloudCover: String,
+        val windCompass: String,
+        val windScale: String,
         val hours: List<HourLine>,
     )
 
@@ -557,6 +567,9 @@ object QweatherLogger {
             pressureHpa = cell("pressure_hpa"),
             humidity = cell("humidity"),
             uvIndex = cell("uv_index"),
+            cloudCover = cell("cloud_cover"),
+            windCompass = cell("wind_compass"),
+            windScale = cell("wind_scale"),
             hours = hours,
         )
     }.getOrNull()

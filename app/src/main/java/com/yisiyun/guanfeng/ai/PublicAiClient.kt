@@ -1,5 +1,6 @@
 package com.yisiyun.guanfeng.ai
 
+import android.content.Context
 import android.util.Log
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
@@ -51,14 +52,22 @@ object PublicAiClient {
      *
      * [onNotice] 用于把「命中限流、正在退避重试」这类状态告诉界面——
      * 否则手表上会静默卡十几秒，看起来像挂了。
+     *
+     * [context] 只用于落盘一份提示词快照（见 [AiPromptDump]），不影响请求本身：
+     * 落盘失败也不会让这次请求失败。
      */
     suspend fun stream(
+        context: Context,
         systemPrompt: String,
         userContent: String,
         onDelta: (String) -> Unit,
         onNotice: (String) -> Unit = {},
     ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
+            // 【发出去之前】把两段提示词逐字落盘。
+            // 放在这里而不是调用方：退避重试也走同一条路，落的就是**这次真正发出去的**内容，
+            // 中间没有任何一处可能被谁改掉。
+            AiPromptDump.write(context, System.currentTimeMillis(), systemPrompt, userContent)
             val body = buildRequestBody(systemPrompt, userContent)
             try {
                 request(body, onDelta)

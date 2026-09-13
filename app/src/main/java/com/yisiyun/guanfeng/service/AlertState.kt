@@ -36,6 +36,17 @@ object AlertState {
     }
 
     /** 测试窗口内的文案；不在窗口内返回 null。 */
+    fun activeTestLabel(nowMs: Long = System.currentTimeMillis()): String? =
+        if (nowMs < testUntilMs) testLabel else null
+
+    /** 预约的兑现时刻（0 = 没有预约）；界面线程写、采样循环线程读。 */
+    @Volatile
+    private var delayedTestAtMs = 0L
+
+    /** 兑现日志里要写的延迟描述（如「30 分钟后」）；与 [delayedTestAtMs] 同生共死。 */
+    @Volatile
+    private var delayedTestNote: String? = null
+
     /**
      * **预约**一次延迟的测试提醒（默认 5 秒后），由**服务自己的循环**去兑现。
      *
@@ -48,23 +59,43 @@ object AlertState {
      *
      * 所以预约存在这里、由 `PressureRecorder` 的采样循环（每 5 秒转一圈）兑现，
      * 走的是**与真实提醒完全相同的那条路**。
+     *
+     * [delayMs] 可以拉长（分钟级），用来验证"长时间之后还来不来"——
+     * 5 秒与 30 分钟之间隔着睡眠模式、后台回收、indicator 换代一整条链路，
+     * 量级不同就不能互相背书。预约时长由界面按钮（5 秒）或文件开关
+     * （`files/test_alert_after_min`，见 [TestAlertSwitch]）给出。
+     *
+     * [note] 只是给兑现日志用的可读描述（如「30 分钟后」），不传就按时长自动生成。
      */
-    private var delayedTestAtMs = 0L
-
-    fun requestDelayedTest(delayMs: Long = 5_000L) {
+    fun requestDelayedTest(delayMs: Long = 5_000L, note: String? = null) {
+        // 界面线程写、采样循环线程读，所以要 volatile：
+        // 不加的话循环有可能一直看不到新值，表现成"预约了却永远不兑现"。
         delayedTestAtMs = System.currentTimeMillis() + delayMs
+        delayedTestNote = note ?: describeDelay(delayMs)
         _refresh.value += 1
     }
 
-    /** 到点了就把它取走（只取一次），未到点或已取走返回 false。 */
-    fun consumeDelayedTest(nowMs: Long): Boolean {
-        if (delayedTestAtMs == 0L || nowMs < delayedTestAtMs) return false
+    /**
+     * 到点了就把它取走（只取一次）。返回可读的延迟描述；未到点或根本没预约返回 null。
+     *
+     * 返回描述而不是 Boolean：兑现那一刻要打日志，而"几分钟后"这个数只有预约时知道，
+     * 事后回看日志必须能一眼分清这次验的是 5 秒还是 30 分钟。
+     */
+    fun consumeDelayedTest(nowMs: Long): String? {
+        if (delayedTestAtMs == 0L || nowMs < delayedTestAtMs) return null
         delayedTestAtMs = 0L
-        return true
+        return delayedTestNote.also { delayedTestNote = null }
     }
 
-    fun activeTestLabel(nowMs: Long = System.currentTimeMillis()): String? =
-        if (nowMs < testUntilMs) testLabel else null
+    /**
+     * 把延迟时长说成人话：整分钟说「N 分钟后」，其余说「N 秒后」。
+     *
+     * 纯函数（单测覆盖）。日志里的单位必须对得上量级——写成"5 秒后"，
+     * 而实际预约的是 30 分钟，比不打日志更糟：它会让人拿着错的量级去对时间。
+     */
+    fun describeDelay(delayMs: Long): String =
+        if (delayMs >= 60_000L && delayMs % 60_000L == 0L) "${delayMs / 60_000L} 分钟后"
+        else "${delayMs / 1000L} 秒后"
 
     /** 真实提醒发生时刻意再刷新一次 indicator。 */
     fun requestRefresh() {
