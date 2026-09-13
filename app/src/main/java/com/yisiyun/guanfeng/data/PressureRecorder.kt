@@ -14,6 +14,7 @@ import com.yisiyun.guanfeng.core.WeatherEpisodeTracker
 import com.yisiyun.guanfeng.core.WeatherRule
 import com.yisiyun.guanfeng.core.HourlyRow
 import com.yisiyun.guanfeng.core.PressureSample
+import com.yisiyun.guanfeng.core.pulseWindowExpired
 import com.yisiyun.guanfeng.core.RainLikelihood
 import com.yisiyun.guanfeng.core.PressureTrendEngine
 import com.yisiyun.guanfeng.core.SampleAggregator
@@ -174,6 +175,41 @@ object PressureRecorder {
     private const val PULSE_INTERVAL_MS = 10L * 60L * 1000L
 
     /**
+     * 脉冲窗口里"取了心率之后，再等腕温多久就收工"。
+     *
+     * 为什么不干脆等满 [PULSE_ON_MS]：那是**定时器**，而进程随时可能被冻结或被杀，
+     * 定时器就再也不会响（见 [maybeClosePulseWindow] 的真机账）。
+     */
+    private const val PULSE_TEMP_GRACE_MS = 5_000L
+
+    /**
+     * 墙钟强关门限：比 [PULSE_ON_MS] 多给 10 秒宽限。
+     *
+     * 为什么不直接取 20 秒：正常收尾是那条 `delay(20s)`，两者会在同一秒前后脚到。
+     * 门限贴着 20 秒的话，**每一轮都会**由强关先出手，于是每轮多出一条"超时强关"日志——
+     * 报警变成噪声，真正出问题那一次反而淹掉了。给 10 秒宽限，正常路径先赢；
+     * 只有真挂起过（uptime 停摆、20 秒拖成几分钟）才会走到强关。
+     */
+    private const val PULSE_FORCE_CLOSE_MS = PULSE_ON_MS + 10_000L
+
+    /**
+     * 硬件 FIFO 批量延迟：让事件先攒在**器件侧**的 FIFO 里，攒够或到点再一次性投递。
+     *
+     * 取 1 秒是个权衡（不是随手写的数）：
+     *   · 现在 4 路 5 Hz 的注册全是 `batching_period = 0`，也就是**每秒 20 次事件投递**；
+     *     1 秒批量把它压到 20 个事件凑成一批。
+     *   · 为什么不用 5 秒（正好等于落盘节奏）：高度解耦要把"同一时刻"的**气压**与
+     *     **竖直位移**配对，两路都批量到 5 秒后，两者的时间差最大可到 5 秒——
+     *     电梯里气压 2.8 hPa/分，5 秒就是 0.23 hPa 的错配。1 秒把这个错配压到 0.05 hPa。
+     *
+     * 关键前提：**批量不会动到物理**。竖直积分用的是 `event.timestamp`（事件自带的时间戳，
+     * 穿过 FIFO 依然保留），不是回调到达的墙钟——见 [integrateVertical]。
+     * 不支持批量的器件（AOSP 合成的 Linear Acceleration 的 maxDelay = 0）会被框架钳回 0，
+     * 只是白传一个参数，不会有副作用。
+     */
+    private const val BATCH_LATENCY_US = 1_000_000
+
+    /**
      * 低于这个值的心率读数一律视为"没在测"。
      *
      * 生理上不可能有人静息心率低于 20，所以这个门限没有误杀风险；
@@ -209,6 +245,12 @@ object PressureRecorder {
     private var weatherJob: Job? = null
     /** 需要脉冲式开关的传感器（心率、腕温）。 */
     private var pulseSensors: List<Sensor> = emptyList()
+
+    /** 脉冲窗口是否开着（传感器回调线程读，关窗时写）。 */
+    @Volatile private var pulseWindowOpen = false
+    private var pulseWindowStartedMs = 0L
+    @Volatile private var pulseHrSeen = false
+    @Volatile private var pulseTempSeen = false
     private var sensorManager: SensorManager? = null
     private var logger: CsvSessionLogger? = null
     /** 供采样子循环写回跨会话状态用（sampleLoop 里拿不到 start() 的局部变量）。 */
@@ -529,14 +571,15 @@ object PressureRecorder {
                 return@forEach
             }
             val ok = runCatching {
-                manager.registerListener(listener, sensor, periodUs)
+                // 带批量注册：少投递、少唤醒，但样本与时间戳一个不少（见 BATCH_LATENCY_US）
+                manager.registerListener(listener, sensor, periodUs, BATCH_LATENCY_US)
             }.getOrElse { error ->
                 Log.w(TAG, "注册 type=$type 抛异常: $error")
                 false
             }
             if (ok) registered++ else Log.w(TAG, "注册 type=$type 失败")
         }
-        Log.i(TAG, "已注册 $registered/${core.size} 个核心传感器")
+        Log.i(TAG, "已注册 $registered/${core.size} 个核心传感器（批量 ${BATCH_LATENCY_US / 1000} 毫秒）")
 
         // 第二类「体感」：心率与腕温 —— 改成脉冲式，默认关着，每 PULSE_INTERVAL_MS 开 PULSE_ON_MS。
         //
@@ -563,6 +606,10 @@ object PressureRecorder {
 
     /** 打开心率/腕温的采样窗口。 */
     private fun registerPulse(manager: SensorManager) {
+        pulseHrSeen = false
+        pulseTempSeen = false
+        pulseWindowStartedMs = System.currentTimeMillis()
+        pulseWindowOpen = true
         pulseSensors.forEach { sensor ->
             runCatching { manager.registerListener(sensorListener, sensor, CORE_SAMPLING_US) }
                 .onFailure { Log.w(TAG, "脉冲注册 type=${sensor.type} 失败: $it") }
@@ -572,10 +619,42 @@ object PressureRecorder {
 
     /** 关闭窗口——这一步才是省电发生的地方。 */
     private fun unregisterPulse(manager: SensorManager) {
+        pulseWindowOpen = false
         pulseSensors.forEach { sensor ->
             runCatching { manager.unregisterListener(sensorListener, sensor) }
         }
         Log.i(TAG, "体感采样窗口关闭")
+    }
+
+    /**
+     * 心率与腕温都到手了就**立刻**关窗，不等那个 20 秒定时器。
+     *
+     * ## 为什么必须这样（真机账，2026-09-12）
+     *
+     * `dumpsys batterystats` 里我们这一项：`Sensor 21`（心率）**注册了 7 小时 33 分**，
+     * 而进程总共只跑了约 15.7 小时 —— 也就是说 PPG 亮了 **48%** 的时间，
+     * 设计值（每 10 分钟开 20 秒）是 **3.3%**，差了一个数量级还多；
+     * 腕温 `Sensor 69815` 同样是 7 小时 35 分。
+     *
+     * 机制不是"定时器不准"：真机日志里清醒时每对开/关都精确是 20.0 秒。
+     * 出问题的是**进程被冻结或被杀的那一刻**——尤其是主人睡觉触发手表自己的睡眠模式时。
+     * 关窗这个动作挂在协程的定时器上，进程一冻结，定时器就再也不会响：
+     * 窗口从"开启"一直挂到进程被系统杀掉为止，PPG 就这么白亮了几小时。
+     *
+     * 改成"数据到手就关"之后，窗口的敞口只取决于**首个心率读数什么时候来**
+     * （PPG 在腕时 1 Hz 上下，通常 1 秒内），而定时期只作为兜底留给"根本没数据"的情况。
+     * 这样即使立刻被冻结，也已经关过了。
+     *
+     * 腕温给 [PULSE_TEMP_GRACE_MS] 的宽限：它常比心率晚一两拍，但绝不能为了等它
+     * 把窗口敞着——腕温拿不到就是拿不到（离腕时它压根不上报有效值）。
+     */
+    private fun maybeClosePulseWindow() {
+        if (!pulseWindowOpen) return
+        if (!pulseHrSeen) return
+        val waitedMs = System.currentTimeMillis() - pulseWindowStartedMs
+        if (pulseTempSeen || waitedMs >= PULSE_TEMP_GRACE_MS) {
+            sensorManager?.let { unregisterPulse(it) }
+        }
     }
 
     private val sensorListener = object : SensorEventListener {
@@ -596,11 +675,23 @@ object PressureRecorder {
                     Sensor.TYPE_HEART_RATE -> {
                         val bpm = event.values.getOrNull(0) ?: 0f
                         heartRate = bpm.takeIf { it > MIN_VALID_HEART_RATE_BPM }
+                        // 拿到一次有效心率就够这一轮用了：立刻关窗（见 maybeClosePulseWindow）
+                        if ((heartRate ?: 0f) > MIN_VALID_HEART_RATE_BPM) {
+                            pulseHrSeen = true
+                            maybeClosePulseWindow()
+                        }
                     }
 
                     TYPE_WRIST_TEMPERATURE -> {
                         val values = event.values
-                        if (values.isNotEmpty() && values[0] > 1f) wristTemperature = values[0]
+                        if (values.isNotEmpty() && values[0] > 1f) {
+                            wristTemperature = values[0]
+                            if (pulseWindowOpen && !pulseTempSeen) {
+                                pulseTempSeen = true
+                                // 腕温也到手了：这一轮没有别的要等，立刻关窗
+                                maybeClosePulseWindow()
+                            }
+                        }
                     }
 
                     Sensor.TYPE_GRAVITY -> event.values.copyInto(gravity)
@@ -703,6 +794,19 @@ object PressureRecorder {
             nextDueMs += SAMPLE_INTERVAL_MS
 
             val now = System.currentTimeMillis()
+
+            // 【脉冲窗口的第二道闸】按**墙钟**超时强关（见 core/PulseWindow.kt 的真机账）。
+            //
+            // 关窗原本只挂在协程的 delay(20s) 上，而 delay 走 uptime —— 手表熄屏空闲时整机挂起，
+            // uptime 不走，于是"20 秒"在真机上被拖成平均 8.9 分钟：dumpsys 里心率传感器
+            // 注册了 7h33m/51 次，PPG 亮了 48%（设计 3.3%），而**日志里清醒时每一对都精确是 20.0 秒**，
+            // 光看日志根本发现不了。采样循环本来就按墙钟调度，顺手在这里判一次，
+            // 下一次 tick（挂起结束后）就能把窗口关掉，不必等进程被杀。
+            if (pulseWindowOpen && pulseWindowExpired(pulseWindowStartedMs, now, PULSE_FORCE_CLOSE_MS)) {
+                Log.i(TAG, "脉冲窗口超时（墙钟），强关以免 PPG 空亮")
+                sensorManager?.let { unregisterPulse(it) }
+            }
+
             val sample = aggregator.flush(now) ?: continue
 
             samples += sample
