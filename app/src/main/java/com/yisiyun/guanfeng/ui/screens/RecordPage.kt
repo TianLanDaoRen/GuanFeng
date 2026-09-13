@@ -128,18 +128,6 @@ fun RecordPage(state: RecorderState) {
             Kv("拟合优度", "%.3f".format(trend?.fitRSquared ?: 0f))
             Kv("窗口覆盖", "%.0f%%".format((trend?.coverageFraction ?: 0f) * 100f))
 
-            // 把"累计垂直位移"这个数的性质写在旁边：它不是海拔、也不是走过多少米，
-            // 而是**解耦残差**——累计被判定为"人在垂直运动"而扣掉的那部分气压。
-            // 为什么要写：2026-09-12 夜里它显示过 +69.7 米，主人当场质疑——
-            // 起因就是"窗口内局部量"被当成"累计量"显示。口径写进页面，才不用每次口头解释。
-            Text(
-                text = "累计量是解耦残差：一趟往返后应回到 0 附近；数小时不动说明静止时不漂。" +
-                    "（今天一趟 70 米往返后残留约 0.4 米）",
-                color = INK_LOW,
-                fontSize = 7.sp,
-                lineHeight = 10.sp,
-            )
-
             if (rationale != null) {
                 Spacer(Modifier.height(4.dp))
                 Text("判定依据", color = Color(0xFFF2C14E), fontSize = 9.sp)
