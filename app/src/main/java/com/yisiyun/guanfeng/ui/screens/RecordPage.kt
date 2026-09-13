@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -27,8 +28,10 @@ import com.yisiyun.guanfeng.ui.components.SUBTITLE_INK
 import com.yisiyun.guanfeng.log.WeatherObservation
 import com.yisiyun.guanfeng.service.AlertState
 import com.yisiyun.guanfeng.service.TrendNotifier
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.yisiyun.guanfeng.core.RainLikelihood
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.setValue
@@ -233,6 +236,9 @@ fun RecordPage(state: RecorderState) {
             )
 
             Spacer(Modifier.height(6.dp))
+            ArchiveHealthSection()
+
+            Spacer(Modifier.height(6.dp))
             Text(
                 text = "每 5 秒一个样本 · 正式窗口 3 小时 · 风雨倾向为启发式规则、未用真实降水校准",
                 color = INK_LOW,
@@ -243,8 +249,121 @@ fun RecordPage(state: RecorderState) {
     }
 }
 
+/**
+ * 长期归档体检（见 `log/ArchiveHealth.kt`）。
+ *
+ * 归档是**唯一永不删除**的数据：原始采样文件只留最近 30 MB（约 15 天）就会被裁掉，
+ * 而长期趋势、关联视图、AI 报告全靠归档。它悄悄停止增长的话，后果要**几周后**才被发现，
+ * 那时原始样本早被裁掉、那段历史再也补不回来——所以把体检摆在看得见的地方。
+ *
+ * 数据在 IO 线程上读（尾部窗口 + 很小的归档文件），每 60 秒刷一次；读不到就整块不显示，
+ * 不让一次磁盘异常把这一页搞成空白。
+ */
 @Composable
-private fun Kv(label: String, value: String) {
+private fun ArchiveHealthSection() {
+    val context = LocalContext.current
+    var health by remember { mutableStateOf<com.yisiyun.guanfeng.log.ArchiveHealth?>(null) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            val now = System.currentTimeMillis()
+            health = withContext(Dispatchers.IO) {
+                runCatching {
+                    com.yisiyun.guanfeng.log.loadArchiveHealth(
+                        context = context,
+                        nowMs = now,
+                        recentWindowMs = ARCHIVE_CHECK_WINDOW_MS,
+                    )
+                }.getOrNull()
+            }
+            delay(60_000L)
+        }
+    }
+
+    val snapshot = health ?: return
+    Spacer(Modifier.height(2.dp))
+    Text("长期归档", color = Color(0xFF6EE7A8), fontSize = 9.sp)
+
+    // 措辞要准：比对的是"原始文件里有解耦样本、且已经走完的那些整点"，
+    // 不是"最近 N 小时"。第一版写"近 18 小时无缺口"，会被读成"归档只覆盖 18 小时"——
+    // 而归档其实覆盖 22 小时，只是其余几个整点在原始文件里没有解耦样本可比。
+    val gapText = if (snapshot.healthy) {
+        "近段 ${snapshot.recentHourCount} 个整点全部已归档"
+    } else {
+        "近段 ${snapshot.recentHourCount} 个整点里缺 ${snapshot.missingRecentHours.size} 个"
+    }
+    Kv(
+        label = "归档完整性",
+        value = gapText,
+        // 有缺口才用警示色：健康时用高档白，避免"天天报警"把颜色用成噪声
+        valueColor = if (snapshot.healthy) INK_HIGH else Color(0xFFFF7A6B),
+    )
+    Kv(
+        label = "归档覆盖",
+        value = buildString {
+            append(snapshot.archiveHours)
+            append(" 小时 · ")
+            append(snapshot.earliestArchiveHourMs?.let { hourLabel(it) } ?: "无")
+            append(" 起")
+        },
+        valueColor = INK_MID,
+    )
+    // 体积这一行**只放短值**：第一版把"1.7 MB / 30 MB · 保留自 09-11 18:21"整串塞进值里，
+    // 而 Kv 的值是不定宽的、标签是 weight(1f)，结果标签"原始文件"被顶出了屏幕外（真机截图可见）。
+    // 长信息走下一行小字——与"单位不跟数值挤一行"是同一条教训。
+    Kv(
+        label = "原始文件",
+        value = String.format(
+            java.util.Locale.US,
+            "%.1f MB / %d MB",
+            snapshot.sampleBytes / 1048576f,
+            snapshot.sampleLimitBytes / 1048576L,
+        ),
+        valueColor = INK_MID,
+    )
+    Text(
+        text = buildString {
+            append("占上限 %.1f%%".format(java.util.Locale.US, snapshot.sampleUsage * 100f))
+            append(" · 现有样本保留自 ")
+            append(snapshot.sampleEarliestMs?.let { minuteLabel(it) } ?: "无")
+        },
+        color = INK_LOW,
+        fontSize = 7.sp,
+    )
+    if (snapshot.duplicateArchiveHours > 0) {
+        // 重复整点不是错误（重启会把当前小时再落一次盘，读取时按整点去重），
+        // 但它是"重启过几次"的旁证，写出来比藏着好
+        Text(
+            text = "有 ${snapshot.duplicateArchiveHours} 个整点被重复落盘（读取时已按整点去重）",
+            color = INK_LOW,
+            fontSize = 7.sp,
+        )
+    }
+}
+
+/** 整点时刻：归档覆盖的是整点，显示成"09-12 21:00"。 */
+private fun hourLabel(ms: Long): String =
+    java.text.SimpleDateFormat("MM-dd HH:00", java.util.Locale.US).format(java.util.Date(ms))
+
+/**
+ * 真实时刻（分钟级）。
+ *
+ * 样本时间戳不是整点：第一版的格式串把分钟写死成 `:00`，于是 18:21 的首个样本
+ * 被显示成 18:00 —— 体检页显示"看起来精确的错数"比不显示更坏，因为它会让人按错的时刻去对账。
+ */
+private fun minuteLabel(ms: Long): String =
+    java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.US).format(java.util.Date(ms))
+
+/** 体检窗口：与启动时的归档修补窗口同宽（24 小时），两边看的是同一段。 */
+private const val ARCHIVE_CHECK_WINDOW_MS = 24L * 60L * 60L * 1000L
+
+@Composable
+private fun Kv(
+    label: String,
+    value: String,
+    /** 值的颜色：默认高档（数值/正文）。有告警语义时由调用方覆盖。 */
+    valueColor: Color = INK_HIGH,
+) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
         // 标签占剩余空间、值取自身宽度并右对齐：固定比例的 Spacer 会把长值挤没
         Text(
@@ -256,7 +375,7 @@ private fun Kv(label: String, value: String) {
         )
         Text(
             text = value,
-            color = Color(0xFFE8E8E8),
+            color = valueColor,
             fontSize = 9.sp,
             maxLines = 1,
             textAlign = TextAlign.End,
