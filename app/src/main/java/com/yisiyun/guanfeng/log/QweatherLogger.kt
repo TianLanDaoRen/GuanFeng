@@ -340,20 +340,66 @@ object QweatherLogger {
         val primaryPollutant: String,
     )
 
-    fun readLatestAir(context: Context): AirLine? = runCatching {
-        val file = File(directory(context), AIR_FILE)
+    /**
+     * 取一个 CSV 的**表头**：读文件**第一行**，读不到或不像表头就退回常量表头。
+     *
+     * 为什么不许再从"尾部窗口"里找表头 —— 这是现场抓出来的事故（2026-09-12）：
+     * 逐日文件每轮追加 7 行约 595 字节，而读取窗口是尾部 8 KB。
+     * 到第 14 轮采集，文件长到 8325 字节，表头（第 1 行 107 字节）被挤到窗口之外 **133 字节**处，
+     * "找不到表头"于是变成"没有近七天数据"：数据在盘上一条不少，页面却是空的。
+     * 这不是偶发——第 97 轮采集后同样的写法会让空气质量也突然"没有数据"。
+     *
+     * 表头**永远写在文件第一行**（换格式时整份归档重写，绝不就地混列），
+     * 所以直接读第一行：不依赖文件长到多大，也不会随窗口大小悄悄失效。
+     */
+    internal fun headerOf(file: File, constantHeader: String): List<String> {
+        val first = runCatching {
+            if (!file.exists()) return@runCatching null
+            java.io.RandomAccessFile(file, "r").use { raf ->
+                val buffer = ByteArray(minOf(1024L, raf.length()).toInt().coerceAtLeast(1))
+                val read = raf.read(buffer)
+                if (read <= 0) null else String(buffer, 0, read, Charsets.UTF_8).lineSequence().firstOrNull()
+            }
+        }.getOrNull()
+        return if (first != null && first.startsWith("fetched_ms")) {
+            first.split(",")
+        } else {
+            constantHeader.split(",")
+        }
+    }
+
+    /**
+     * 读最新一条空气质量。
+     *
+     * 纯函数、不碰 Context：这样"表头落在窗口之外"这个回归能被单测钉死。
+     */
+    internal fun readAirFrom(file: File): AirLine? {
         if (!file.exists()) return null
-        val lines = readTailLines(file, 4 * 1024).filter { it.isNotBlank() }
-        val header = lines.firstOrNull { it.startsWith("fetched_ms") }?.split(",") ?: return null
-        val row = lines.last().split(",")
-        if (row.size != header.size) return null
+        val header = headerOf(file, AIR_HEADER)
+        val rows = readTailLines(file, 4 * 1024)
+            .map { it.split(",") }
+            .filter { it.size == header.size }
+        val row = rows.lastOrNull() ?: return null
         fun col(name: String) = row.getOrNull(header.indexOf(name)).orEmpty()
-        AirLine(
+        return AirLine(
             fetchedClock = col("fetched_clock"),
             aqi = col("aqi"),
             category = col("category"),
             primaryPollutant = col("primary_pollutant"),
         )
+    }
+
+    fun readLatestAir(context: Context): AirLine? = runCatching {
+        val file = File(directory(context), AIR_FILE)
+        readAirFrom(file).also {
+            // 读空必须留痕：静默返回 null 会让"文件里有数据、页面没有"变成一个查不出的谜。
+            if (it == null) {
+                android.util.Log.w(
+                    "QweatherLogger",
+                    "空气质量读取为空 存在=" + file.exists() + " 字节=" + file.length(),
+                )
+            }
+        }
     }.onFailure {
         // **失败必须留痕**：天气页一直显示"还没有采到数据"，而数据其实在文件里时，
         // 最容易发生的事就是这里的异常被 getOrNull() 静默吃掉、谁都查不出为什么。
@@ -374,18 +420,26 @@ object QweatherLogger {
      *
      * 与逐小时同理：文件里每轮追加 7 行，必须按 fetched_ms 分组取最后一组，
      * 否则横条上会出现同一日期的新旧两条。
+     *
+     * 表头从**文件第一行**读（见 [headerOf] 的事故说明），所以窗口第一行是数据、
+     * 而且可能是被截断的半截行——**不能**再像第一版那样"第一行当表头再 drop(1)"。
+     * 半截行靠"列数必须等于表头列数 + fetched_ms 必须等于最后一组"两道过滤自然剔掉。
+     *
+     * 纯函数、不碰 Context：这样"表头落在窗口之外"这个回归能被单测钉死。
      */
-    fun readLatestDays(context: Context): List<DayLine> = runCatching {
-        val file = File(directory(context), DAILY_FILE)
+    internal fun readDaysFrom(file: File): List<DayLine> {
         if (!file.exists()) return emptyList()
-        val lines = readTailLines(file, 8 * 1024).filter { it.isNotBlank() }
-        val header = lines.firstOrNull { it.startsWith("fetched_ms") }?.split(",") ?: return emptyList()
-        val rows = lines.drop(1).map { it.split(",") }.filter { it.size == header.size }
-        if (rows.isEmpty()) return emptyList()
+        val header = headerOf(file, DAILY_HEADER)
         val fi = header.indexOf("fetched_ms")
-        val last = rows.last().getOrNull(fi).orEmpty()
+        if (fi < 0) return emptyList()
+        // 窗口只需装下最后一组（7 行约 600 字节），8 KB 绰绰有余
+        val rows = readTailLines(file, 8 * 1024)
+            .map { it.split(",") }
+            .filter { it.size == header.size }
+        val last = rows.lastOrNull()?.getOrNull(fi).orEmpty()
+        if (last.isEmpty()) return emptyList()
         fun col(row: List<String>, name: String) = row.getOrNull(header.indexOf(name)).orEmpty()
-        rows.filter { it.getOrNull(fi) == last }.map {
+        return rows.filter { it.getOrNull(fi) == last }.map {
             DayLine(
                 dateUtc = col(it, "date_utc"),
                 conditionCode = col(it, "condition_code"),
@@ -393,6 +447,18 @@ object QweatherLogger {
                 minC = col(it, "temp_min_c"),
                 uvMax = col(it, "uv_index_max"),
             )
+        }
+    }
+
+    fun readLatestDays(context: Context): List<DayLine> = runCatching {
+        val file = File(directory(context), DAILY_FILE)
+        readDaysFrom(file).also {
+            if (it.isEmpty()) {
+                android.util.Log.w(
+                    "QweatherLogger",
+                    "逐日读取为空 存在=" + file.exists() + " 字节=" + file.length(),
+                )
+            }
         }
     }.getOrDefault(emptyList())
 

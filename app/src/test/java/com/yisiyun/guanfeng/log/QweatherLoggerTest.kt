@@ -1,6 +1,7 @@
 package com.yisiyun.guanfeng.log
 
 import com.yisiyun.guanfeng.data.QweatherClient
+import java.io.File
 import java.util.Locale
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -148,5 +149,93 @@ class QweatherLoggerTest {
         // 反而变短了：更不该猜
         assertFalse(QweatherLogger.canPadToMatch("a,b,c", "a,b"))
         assertFalse(QweatherLogger.canPadToMatch(null, "a,b,c"))
+    }
+
+    private fun dayRow(ms: Long, date: String): String = listOf(
+        ms.toString(), "20:39:33", date, "33.0040", "114.0120", "101", "多云",
+        "28.66", "18.41", "6",
+    ).joinToString(",")
+
+    @Test
+    fun `表头被挤出尾部窗口时_近七天仍要读得到`() {
+        // 现场事故复现（2026-09-12）：文件 8325 字节，读取窗口是**尾部 8 KB**，
+        // 表头（第 1 行 107 字节）被挤到窗口之外 133 字节处。
+        // 旧实现先找表头、找不到就 `return emptyList()` ——
+        // 于是"读不到列名"变成了"没有近七天数据"：数据在盘上一条不少，页面却是空的。
+        // 每次采集追加 7 行约 595 字节，所以这是**必然会到的日子**（第 14 轮），不是偶发。
+        val file = File.createTempFile("qweather_daily", ".csv")
+        try {
+            val text = StringBuilder(QweatherLogger.DAILY_HEADER).append('\n')
+            var ms = 1789190000000L
+            repeat(15) {
+                repeat(7) { day ->
+                    text.append(dayRow(ms, "2026-09-%02dT16:00Z".format(day + 11))).append('\n')
+                }
+                ms += 1_800_000L
+            }
+            file.writeText(text.toString())
+
+            // 先把前提钉死：表头必须**整行**落在窗口之外，否则这个测试什么也没测到。
+            // 注意度量单位必须与代码一致——代码读的是**字节**：
+            // 用 `takeLast(8192)` 数**字符**是错的（"多云"占 2 字符 6 字节），
+            // 那样会把整份文件都拿回来、前提形同没查。这个错我第一次就犯了。
+            val headerEnd = QweatherLogger.DAILY_HEADER.toByteArray(Charsets.UTF_8).size + 1
+            val windowStart = file.length() - 8192
+            assertTrue(
+                "前提：表头必须整行落在窗口外（文件 " + file.length() + " 字节、" +
+                    "窗口起点 " + windowStart + "、表头结束于 " + headerEnd + "）",
+                windowStart >= headerEnd,
+            )
+
+            val days = QweatherLogger.readDaysFrom(file)
+            assertEquals("表头在窗口外也必须读到 7 天，而不是 0 天", 7, days.size)
+            assertEquals("2026-09-11T16:00Z", days.first().dateUtc)
+            assertEquals("2026-09-17T16:00Z", days.last().dateUtc)
+            assertEquals("只能是最新一组：不许混进上一轮的同名日期", 7, days.map { it.dateUtc }.toSet().size)
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `空气质量表头在窗口外时也不能消失`() {
+        // 同一个写法、同一个下场：空气质量每次追加 1 行约 65 字节，
+        // 4 KB 窗口撑到第 62 轮采集就会把表头顶出去——约两天后突然"没有空气数据"。
+        val file = File.createTempFile("qweather_air", ".csv")
+        try {
+            val text = StringBuilder(QweatherLogger.AIR_HEADER).append('\n')
+            var ms = 1789190000000L
+            repeat(80) { i ->
+                text.append(
+                    listOf(
+                        ms.toString(), "20:39:33", "33.0040", "114.0120", (40 + i).toString(),
+                        "良", "pm25", "35.00", "48.00",
+                    ).joinToString(","),
+                ).append('\n')
+                ms += 1_800_000L
+            }
+            file.writeText(text.toString())
+
+            assertTrue("前提：文件要长过 4 KB 窗口（实际 " + file.length() + "）", file.length() > 4096)
+            val headerEnd = QweatherLogger.AIR_HEADER.toByteArray(Charsets.UTF_8).size + 1
+            assertTrue(
+                "前提：表头必须整行落在窗口外",
+                file.length() - 4096 >= headerEnd,
+            )
+
+            val air = QweatherLogger.readAirFrom(file)
+            assertTrue("表头在窗口外也必须读到空气数据", air != null)
+            assertEquals("读到的必须是最新一条", "119", air?.aqi)
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `两个常量表头都必须能被认成表头`() {
+        // headerOf 靠"第一行以 fetched_ms 开头"来判断这一行是不是表头；
+        // 常量表头若不以它开头，读第一行会失败、只能退回常量，等于把兜底当成了主路。
+        assertTrue(QweatherLogger.DAILY_HEADER.startsWith("fetched_ms"))
+        assertTrue(QweatherLogger.AIR_HEADER.startsWith("fetched_ms"))
     }
 }
