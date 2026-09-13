@@ -174,7 +174,9 @@ fun WeatherPage(state: RecorderState) {
             Spacer(Modifier.height(2.dp))
             Text(
                 text = if (isFast) {
-                    "速评 · 5 分钟窗口 · 数据越久越准"
+                    // 不要写"5 分钟窗口"：那是内部概念，和主页面说的 3 小时窗口并列时会让人以为
+                    // 预测只有 5 分钟有效（主人明确指出过）。这里只讲"这是临时结论、会越来越准"。
+                    "速评 · 数据越久越准"
                 } else {
                     "ΔP(3h) 外推 %+.1f hPa".format(trend?.deltaHpaPer3h ?: 0f)
                 },

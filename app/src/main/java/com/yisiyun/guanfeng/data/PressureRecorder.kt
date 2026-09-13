@@ -7,6 +7,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.util.Log
 import com.yisiyun.guanfeng.core.HPA_PER_METER_NEAR_SEA_LEVEL
+import com.yisiyun.guanfeng.core.HeartRateDisplay
 import com.yisiyun.guanfeng.core.HourAccumulator
 import com.yisiyun.guanfeng.core.backfillCarriedOver
 import com.yisiyun.guanfeng.core.missingHourBuckets
@@ -308,6 +309,15 @@ object PressureRecorder {
     // 传感器原始读数
     private var latestPressure: Float? = null
     private var heartRate: Float? = null
+
+    /**
+     * 最近一次**有效**心率与它的时刻：只服务界面显示（见 core/HeartRateDisplay）。
+     *
+     * 真机现象：主人一直戴着，心率却时不时显示"—"。原因是脉冲窗口之间的无效读数
+     * （0 = 没在测）被直接写成 null。统计口径不变——静息基线/归档仍只用新鲜值。
+     */
+    private var lastValidHeartRate: Float? = null
+    private var lastValidHeartRateMs = 0L
     private var wristTemperature: Float? = null
     private var lightLux: Float? = null
     private val gravity = FloatArray(3)
@@ -688,6 +698,10 @@ object PressureRecorder {
                     Sensor.TYPE_HEART_RATE -> {
                         val bpm = event.values.getOrNull(0) ?: 0f
                         heartRate = bpm.takeIf { it > MIN_VALID_HEART_RATE_BPM }
+                        heartRate?.let {
+                            lastValidHeartRate = it
+                            lastValidHeartRateMs = System.currentTimeMillis()
+                        }
                         // 拿到一次有效心率就够这一轮用了：立刻关窗（见 maybeClosePulseWindow）
                         if ((heartRate ?: 0f) > MIN_VALID_HEART_RATE_BPM) {
                             pulseHrSeen = true
@@ -789,7 +803,13 @@ object PressureRecorder {
                 weatherPressureHpa = latestPressure?.minus(elevationOffsetHpa),
                 // 跨窗口累计位移：与解耦用的是同一个偏移（界面显示的就是它）
                 elevationOffsetMeters = -elevationOffsetHpa / HPA_PER_METER_NEAR_SEA_LEVEL,
-                heartRateBpm = currentHeartRate,
+                // 新鲜值优先；两次脉冲之间显示最近一次有效值（超 30 分钟才显示"—"）
+                heartRateBpm = HeartRateDisplay.pick(
+                    fresh = currentHeartRate,
+                    lastValid = lastValidHeartRate,
+                    lastValidMs = lastValidHeartRateMs,
+                    nowMs = now,
+                ),
                 restingHeartRateBpm = restingBaseline,
                 wristTemperatureC = wristTemperature,
                 wristTemperatureBaselineC = wristTempBaseline?.takeIf { wristTempReadings >= 20 },

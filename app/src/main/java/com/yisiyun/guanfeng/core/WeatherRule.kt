@@ -136,9 +136,11 @@ object WeatherRule {
                 likelihood = RainLikelihood.HIGH,
                 shortReason = if (recentFall < netChange) "已降幅较大" else "窗口内急降",
                 advice = "带伞",
-                rationale = "窗口内净降 %.1f hPa，最近数小时累计降幅 %.1f hPa，" +
-                    "已达「暴风定律」的 %.0f hPa 门槛（该定律描述的是净降量，不是瞬时斜率）"
-                        .format(netChange, recentFall, BIG_FALL_HPA)
+                // 整段加括号：`.format` 只绑紧邻字面量（本文件踩过两次，别删这对括号）
+                rationale = (
+                    "窗口内净降 %.1f hPa，最近数小时累计降幅 %.1f hPa，" +
+                        "已达「暴风定律」的 %.0f hPa 门槛（该定律描述的是净降量，不是瞬时斜率）"
+                    ).format(netChange, recentFall, BIG_FALL_HPA)
             )
         }
         if (netTrustworthy && worstFall <= -MODERATE_FALL_HPA) {
@@ -146,8 +148,10 @@ object WeatherRule {
                 likelihood = RainLikelihood.MEDIUM,
                 shortReason = if (recentFall < netChange) "已降幅偏大" else "气压缓降",
                 advice = "备把伞",
-                rationale = "窗口内净降 %.1f hPa，最近数小时累计降幅 %.1f hPa，" +
-                    "天气有转坏倾向".format(netChange, recentFall)
+                rationale = (
+                    "窗口内净降 %.1f hPa，最近数小时累计降幅 %.1f hPa，" +
+                        "天气有转坏倾向"
+                    ).format(netChange, recentFall)
             )
         }
 
@@ -158,9 +162,14 @@ object WeatherRule {
                 likelihood = RainLikelihood.UNKNOWN,
                 shortReason = "抖动过大",
                 advice = "再等等",
-                rationale = "窗口内气压在来回振荡（路径 %.1f hPa 而净变 %.1f hPa，效率 %.0f%%），" +
-                    "既算不出可信斜率、净量也不代表真实趋势"
-                        .format(trend.pathLengthHpa, netChange, pathEfficiency * 100)
+                // 【必须整段加括号】`.format` 只作用于**紧邻的那个字面量**：
+                // 写成 "A" + "B".format(...) 时，A 里的 %.1f 会原样打到手表上。
+                // 这条坑本项目踩过两次（上一次在净变幅那条），所以现在有守卫测试：
+                // WeatherRuleRationaleTest 会遍历各分支断言文案里不许残留 %。
+                rationale = (
+                    "窗口内气压在来回振荡（路径 %.1f hPa 而净变 %.1f hPa，效率 %.0f%%），" +
+                        "既算不出可信斜率、净量也不代表真实趋势"
+                    ).format(trend.pathLengthHpa, netChange, pathEfficiency * 100)
             )
         }
         if (trend.confidence == TrendConfidence.NOISY) {
