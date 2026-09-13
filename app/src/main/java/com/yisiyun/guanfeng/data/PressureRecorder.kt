@@ -21,6 +21,7 @@ import com.yisiyun.guanfeng.core.TrendResult
 import com.yisiyun.guanfeng.log.CsvSessionLogger
 import com.yisiyun.guanfeng.log.HourlyArchive
 import com.yisiyun.guanfeng.log.PowerLogger
+import com.yisiyun.guanfeng.service.AlertState
 import com.yisiyun.guanfeng.service.TrendNotifier
 import com.yisiyun.guanfeng.log.SessionHistory
 import kotlin.math.abs
@@ -794,6 +795,12 @@ object PressureRecorder {
                 ) {
                     weatherJob = scope?.launch { WeatherCollector.collect(context, now) }
                 }
+            }
+
+            // 预约的测试提醒：**由服务循环兑现**，走的是与真实提醒同一条路。
+            // 这是为了回答"服务能不能调起震动"——用界面里的 delay 验不出来。
+            if (AlertState.consumeDelayedTest(now)) {
+                appContext?.let { TrendNotifier.triggerTestAlert(it) }
             }
 
             // 主动提醒：转坏到「高」时发一条通知（声音与震动交给系统）。

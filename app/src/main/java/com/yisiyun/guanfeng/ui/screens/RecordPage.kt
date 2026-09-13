@@ -25,6 +25,7 @@ import com.yisiyun.guanfeng.data.RecorderState
 import com.yisiyun.guanfeng.ui.components.PageHeader
 import com.yisiyun.guanfeng.ui.components.SUBTITLE_GRAY
 import com.yisiyun.guanfeng.log.WeatherObservation
+import com.yisiyun.guanfeng.service.AlertState
 import com.yisiyun.guanfeng.service.TrendNotifier
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -137,7 +138,10 @@ fun RecordPage(state: RecorderState) {
                     .clickable {
                         // 通知这条路已被系统白名单堵死（实测点了毫无震动），
                         // 所以测试改为验证真正要用的两条腿：**马达震动 + indicator 文案**。
-                        TrendNotifier.triggerTestAlert(context)
+                        // **不立即震**：预约 5 秒后由服务循环兑现。
+                        // 这样按下按钮后可以退出应用/熄屏，验证的是
+                        // "**服务**能不能调起震动"，而不是"界面还在不在"。
+                        AlertState.requestDelayedTest(5_000L)
                         noticeFeedback = "已震动 · indicator 显示 20 秒"
                         scope.launch {
                             delay(20_000)
@@ -152,7 +156,7 @@ fun RecordPage(state: RecorderState) {
                 text = if (noticeFeedback.isNotEmpty()) {
                     noticeFeedback
                 } else {
-                    "震动 + 应用内待确认卡片（通知已被系统白名单拦掉，不再依赖它）"
+                    "按下后 5 秒才震。**趁这 5 秒退出应用或熄屏**——震了，说明服务能调起震动；没震，说明这条链路不通"
                 },
                 color = Color(0xFF6E6E6E),
                 fontSize = 7.sp,

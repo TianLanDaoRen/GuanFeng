@@ -36,6 +36,33 @@ object AlertState {
     }
 
     /** 测试窗口内的文案；不在窗口内返回 null。 */
+    /**
+     * **预约**一次延迟的测试提醒（默认 5 秒后），由**服务自己的循环**去兑现。
+     *
+     * ## 为什么不做成"界面里 delay(5s) 然后震动"
+     *
+     * 那样验不出任何东西：界面一离开（或进程被换掉），那个协程就没了，
+     * 震不震只说明界面还在不在，说明不了**服务**能不能调起震动。
+     * 而我们要回答的正是后者——"服务活着"（indicator 已证明）与
+     * "服务能震动"是两件事，中间隔着一个未验证的假设。
+     *
+     * 所以预约存在这里、由 `PressureRecorder` 的采样循环（每 5 秒转一圈）兑现，
+     * 走的是**与真实提醒完全相同的那条路**。
+     */
+    private var delayedTestAtMs = 0L
+
+    fun requestDelayedTest(delayMs: Long = 5_000L) {
+        delayedTestAtMs = System.currentTimeMillis() + delayMs
+        _refresh.value += 1
+    }
+
+    /** 到点了就把它取走（只取一次），未到点或已取走返回 false。 */
+    fun consumeDelayedTest(nowMs: Long): Boolean {
+        if (delayedTestAtMs == 0L || nowMs < delayedTestAtMs) return false
+        delayedTestAtMs = 0L
+        return true
+    }
+
     fun activeTestLabel(nowMs: Long = System.currentTimeMillis()): String? =
         if (nowMs < testUntilMs) testLabel else null
 
