@@ -130,9 +130,27 @@ object SessionHistory {
         return File(directory, SAMPLE_FILE)
     }
 
-    /** 从文件尾部读若干字节并解析（跳过可能被切断的首行）。 */
-    private fun readTail(file: File, maxBytes: Long = TAIL_BYTES): List<PressureSample> =
-        parse(readTailLines(file, maxBytes))
+    /**
+     * 从文件尾部读若干字节并解析（跳过可能被切断的首行）。
+     *
+     * ## 表头必须单独从**文件第一行**取（2026-09-13 真机事故）
+     *
+     * 第一版写成 `parse(readTailLines(file, maxBytes))` —— 但 [parse] 把**列表第一行**当表头，
+     * 而尾部窗口里根本没有表头（它在 2MB 之外）。于是采样文件一旦长过 [TAIL_BYTES]（2MB），
+     * `parse` 就会把一行数据当表头、认不出列名，**静默返回空列表**：
+     * 真机日志 `从历史续接 0 个样本`，3 小时窗口在每次重启后从零开始——
+     * 主人看到的正是"装了一次 App，窗口就没了"。
+     *
+     * 这与 09-12 那次"近七天数据消失"是**同一个 bug 类**：**表头永远在文件第一行，
+     * 不要从尾部窗口里找**。修法：读出首行拼到尾部行前面再交给 [parse]，
+     * 语义与"整份读"完全一致。
+     */
+    internal fun readTail(file: File, maxBytes: Long = TAIL_BYTES): List<PressureSample> = runCatching {
+        if (!file.isFile) return emptyList()
+        val header = file.bufferedReader().use { it.readLine() } ?: return emptyList()
+        if (header.isBlank()) return emptyList()
+        parse(listOf(header) + readTailLines(file, maxBytes))
+    }.getOrElse { emptyList() }
 
     /**
      * 只读文件**尾部**的行（跳过可能被切断的首行）。
