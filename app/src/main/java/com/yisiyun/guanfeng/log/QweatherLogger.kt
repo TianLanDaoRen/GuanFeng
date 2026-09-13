@@ -480,6 +480,8 @@ object QweatherLogger {
         val cloudCover: String,
         val windCompass: String,
         val windScale: String,
+        /** 风向角度（正北 = 0°，顺时针）：界面用中文方位显示，不用英文缩写。 */
+        val windDegree: String,
         val hours: List<HourLine>,
     )
 
@@ -570,6 +572,7 @@ object QweatherLogger {
             cloudCover = cell("cloud_cover"),
             windCompass = cell("wind_compass"),
             windScale = cell("wind_scale"),
+            windDegree = cell("wind_degree"),
             hours = hours,
         )
     }.getOrNull()

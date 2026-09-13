@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.yisiyun.guanfeng.core.WindDirection
 import com.yisiyun.guanfeng.log.QweatherLogger
 import com.yisiyun.guanfeng.ui.components.PageHeader
 import com.yisiyun.guanfeng.ui.components.WeatherIcon
@@ -203,10 +204,10 @@ private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
         )
     }
 
-    // 【不对称的一行】云量 + 风。
-    // 宽度按内容给：风的文字长（"西南 3 级"），云量短（"39%"），
-    // 所以风那格给 1.3 份、云量给 1 份 —— 之前每一行都是两个等宽格子，
-    // 结果长内容那格被挤、短内容那格白留一片。
+    // 【对称的一行】云量 + 风，两格等宽。
+    // 曾经试过"宽度按内容给"（风 1.3 份、云量 1 份），真机一看就是失衡 ——
+    // 在同一页其它行都是等宽的前提下，单独一行不等宽只会显得没对齐。
+    // 等宽也够用：中文方位最宽"西南 3 级"四个字，13sp 下放得进半屏。
     Spacer(Modifier.height(6.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
         MetricCard(
@@ -219,13 +220,14 @@ private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
         MetricCard(
             label = "风",
             value = buildString {
-                append(snapshot.windCompass.ifBlank { "—" }.uppercase())
+                // 中文方位（角度优先）——不要写 NNW 这种英文缩写，那是开发者黑话
+                append(WindDirection.describe(snapshot.windDegree, snapshot.windCompass).ifBlank { "—" })
                 val scale = snapshot.windScale.trim()
                 if (scale.isNotEmpty()) append(" ").append(scale).append(" 级")
             },
             unit = "",
             valueColor = Color(0xFF8FE3C8),
-            modifier = Modifier.weight(1.3f),
+            modifier = Modifier.weight(1f),
         )
     }
 
