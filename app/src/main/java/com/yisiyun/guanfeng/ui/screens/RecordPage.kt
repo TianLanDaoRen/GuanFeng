@@ -123,7 +123,7 @@ fun RecordPage(state: RecorderState) {
             // 主人的一趟散步在窗口里时显示 37，滑出去一半就变 18。
             // 标签必须写清口径——上一版写"解耦样本"，看着像累计数，与旁边的"累计垂直位移"并列时更容易误读。
             Kv("本窗口高度事件", "${trend?.elevationEvents ?: 0} 个")
-            Kv("当前状态", if (trend?.isInVerticalTransit == true) "垂直运动中" else "静止")
+            Kv("高度状态", if (trend?.isInVerticalTransit == true) "高度变化中" else "高度稳定")
             Kv("置信度", (trend?.confidence ?: TrendConfidence.INSUFFICIENT).label)
             Kv("拟合优度", "%.3f".format(trend?.fitRSquared ?: 0f))
             Kv("窗口覆盖", "%.0f%%".format((trend?.coverageFraction ?: 0f) * 100f))

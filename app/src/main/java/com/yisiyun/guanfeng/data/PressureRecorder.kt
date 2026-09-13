@@ -8,6 +8,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.util.Log
 import com.yisiyun.guanfeng.core.Barometric
+import com.yisiyun.guanfeng.core.SensorRatePlan
 import com.yisiyun.guanfeng.core.HeartRateDisplay
 import com.yisiyun.guanfeng.core.HourAccumulator
 import com.yisiyun.guanfeng.core.backfillCarriedOver
@@ -296,6 +297,12 @@ object PressureRecorder {
     private val aggregator = SampleAggregator()
 
     /** 原始流排队区：传感器回调只入内存，刷盘交给采样循环（回调线程不做 I/O）。 */
+    /** 当前核心采样周期（两档切换，见 SensorRatePlan）。 */
+    private var currentRateUs = SensorRatePlan.LOW_US
+
+    /** 高速档保持到什么时候（0 = 现在是低速档）。 */
+    private var fastUntilMs = 0L
+
     private val rawLogQueue = ArrayDeque<String>(8192)
     private var rawLogWriter: java.io.BufferedWriter? = null
     private var rawLogEnabled = false
@@ -366,6 +373,9 @@ object PressureRecorder {
         appContext = applicationContext
         logger = CsvSessionLogger(applicationContext)
         samples.clear()
+        // 档位复位：每次启动都从低速档开始（与回放器的建模一致）
+        currentRateUs = SensorRatePlan.LOW_US
+        fastUntilMs = 0L
         latestPressure = null
         heartRate = null
         wristTemperature = null
@@ -601,11 +611,13 @@ object PressureRecorder {
         //
         // 第一类「核心」：气压 + 竖直运动证据。它们必须连续采样才能工作，
         // 请求速率维持 5 Hz 不动（主人的判断正确）。
+        // 【两档速率】平时 1Hz，气压速率一超阈值就升 5Hz（见 SensorRatePlan 的实测依据）。
+        // 计步是事件型传感器，速率参数对它没意义，永远留在"高速档"那一档的写法上。
         val core = listOf(
-            Sensor.TYPE_PRESSURE to CORE_SAMPLING_US,
-            Sensor.TYPE_GRAVITY to CORE_SAMPLING_US,
-            Sensor.TYPE_LINEAR_ACCELERATION to CORE_SAMPLING_US,
-            Sensor.TYPE_STEP_DETECTOR to CORE_SAMPLING_US,
+            Sensor.TYPE_PRESSURE to currentRateUs,
+            Sensor.TYPE_GRAVITY to currentRateUs,
+            Sensor.TYPE_LINEAR_ACCELERATION to currentRateUs,
+            Sensor.TYPE_STEP_DETECTOR to SensorRatePlan.HIGH_US,
             // 光照单独给慢速率：10 分钟趋势用不上 5 Hz。
             // 但**别指望它省电**——真机上该传感器的 active-count = 2，
             // 系统自己的自动亮度也挂在上面（500 ms），物理器件本来就亮着，
@@ -628,7 +640,12 @@ object PressureRecorder {
             }
             if (ok) registered++ else Log.w(TAG, "注册 type=$type 失败")
         }
-        Log.i(TAG, "已注册 $registered/${core.size} 个核心传感器（批量 ${BATCH_LATENCY_US / 1000} 毫秒）")
+        Log.i(
+            TAG,
+            "已注册 $registered/${core.size} 个核心传感器：采样周期 ${currentRateUs / 1000} 毫秒" +
+                "（${if (currentRateUs == SensorRatePlan.LOW_US) "低速档 1Hz" else "高速档 5Hz"}）" +
+                "，批量 ${BATCH_LATENCY_US / 1000} 毫秒",
+        )
 
         // 第二类「体感」：心率与腕温 —— 改成脉冲式，默认关着，每 PULSE_INTERVAL_MS 开 PULSE_ON_MS。
         //
@@ -730,6 +747,51 @@ object PressureRecorder {
         sb.append(timestampNs).append(',').append(sensorType)
         for (v in values) sb.append(',').append(v)
         rawLogQueue.addLast(sb.toString())
+    }
+
+    /**
+     * 两档速率的切换判定（由采样循环每 5 秒调一次）。
+     *
+     * 判据用**内存里已有的样本**算 30 秒基线速率，不额外读盘、不额外唤醒。
+     * 切档就是重新注册一次那三路传感器——会有几毫秒的空隙，对高度解耦没有影响
+     * （回放器是按"逐事件投递"建模的，没建这个空隙；0.02 hPa 的误差里已经包含它的量级）。
+     */
+    private fun updateSamplingRate(nowMs: Long) {
+        val manager = sensorManager ?: return
+        if (fastUntilMs > 0L && SensorRatePlan.shouldReturnToLow(nowMs, fastUntilMs)) {
+            fastUntilMs = 0L
+            switchRate(manager, SensorRatePlan.LOW_US)
+            return
+        }
+        if (fastUntilMs > 0L) return
+        // 30 秒基线速率（用已落盘的样本；样本不够就不判）
+        val latest = samples.lastOrNull() ?: return
+        val past = samples.lastOrNull { latest.timestampMs - it.timestampMs >= 20_000L } ?: return
+        val spanMs = latest.timestampMs - past.timestampMs
+        if (spanMs < 20_000L) return
+        val rate = (latest.pressureHpa - past.pressureHpa) / (spanMs / 60_000f)
+        if (SensorRatePlan.shouldGoFast(rate, spanMs)) {
+            fastUntilMs = nowMs + SensorRatePlan.HOLD_MS
+            switchRate(manager, SensorRatePlan.HIGH_US)
+            Log.i(TAG, "气压速率 ${csvNum(rate, 2)} hPa/分 → 升到 5Hz（保持 ${SensorRatePlan.HOLD_MS / 1000} 秒）")
+        }
+    }
+
+    /** 切换核心传感器的采样周期（重新注册；计步器不动）。 */
+    private fun switchRate(manager: SensorManager, rateUs: Int) {
+        if (rateUs == currentRateUs) return
+        currentRateUs = rateUs
+        val listener = sensorListener
+        listOf(
+            Sensor.TYPE_PRESSURE,
+            Sensor.TYPE_GRAVITY,
+            Sensor.TYPE_LINEAR_ACCELERATION,
+        ).forEach { type ->
+            val sensor = runCatching { manager.getDefaultSensor(type) }.getOrNull() ?: return@forEach
+            runCatching { manager.unregisterListener(listener, sensor) }
+            runCatching { manager.registerListener(listener, sensor, rateUs, BATCH_LATENCY_US) }
+        }
+        Log.i(TAG, if (rateUs == SensorRatePlan.LOW_US) "已回到 1Hz 低速档" else "核心传感器已切到 5Hz")
     }
 
     /** 把排队的原始事件刷进 raw_sensors.csv（由采样循环每 5 秒调一次，顺带的那次唤醒）。 */
@@ -937,6 +999,7 @@ object PressureRecorder {
             }
 
             flushRawLog()
+            updateSamplingRate(now)
 
             val sample = aggregator.flush(now) ?: continue
 

@@ -109,7 +109,9 @@ fun WeatherPage(state: RecorderState) {
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             ) {
                 Text(
-                    text = if (trend?.isInVerticalTransit == true) "运动中" else "静止",
+                    text = // 这一格说明的是"此刻的气压变化是不是高度引起的"，不是"人在不在动"。
+                    // 写"静止/运动中"会被读成身体状态（主人指出过），改成高度域的说法。
+                    if (trend?.isInVerticalTransit == true) "高度变化中" else "高度稳定",
                     color = if (trend?.isInVerticalTransit == true) Color(0xFFF2C14E) else INK_MID,
                     fontSize = 9.sp,
                 )
