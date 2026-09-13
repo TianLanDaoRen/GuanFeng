@@ -141,7 +141,8 @@ class WatchSessionService : Service() {
         val text = when {
             alert != null && state != null -> "$alert · 已记录 ${state.loggedRows} 行"
             state != null -> "已记录 ${state.loggedRows} 行 · 垂直位移 %+.0f 米"
-                .format(state.trend?.elevationMeters ?: 0f)
+                // 与记录页同口径：跨窗口累计量，不是窗口内局部量
+                .format(state.elevationOffsetMeters)
             else -> "正在记录气压与体感"
         }
 

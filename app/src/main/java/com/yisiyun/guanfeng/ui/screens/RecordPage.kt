@@ -114,8 +114,15 @@ fun RecordPage(state: RecorderState) {
 
             Spacer(Modifier.height(4.dp))
             Text("高度解耦", color = Color(0xFFF2C14E), fontSize = 9.sp)
-            Kv("累计垂直位移", "%+.1f 米".format(trend?.elevationMeters ?: 0f))
-            Kv("解耦样本", "${trend?.elevationEvents ?: 0} 个")
+            // **必须用跨窗口累计量**（state.elevationOffsetMeters）：
+            // trend.elevationMeters 是引擎在"当前 3 小时窗口内"累加的局部量，
+            // 同一段电梯在窗口里进进出出会让它从 +70 米翻到 −70 米——
+            // 2026-09-12 夜里主人就是被这个数吓着的。详见 RecorderState.elevationOffsetMeters 的说明。
+            Kv("累计垂直位移", "%+.1f 米".format(state.elevationOffsetMeters))
+            // 这个数是**当前 3 小时窗口内**的高度事件数（不是历史累计）：
+            // 主人的一趟散步在窗口里时显示 37，滑出去一半就变 18。
+            // 标签必须写清口径——上一版写"解耦样本"，看着像累计数，与旁边的"累计垂直位移"并列时更容易误读。
+            Kv("本窗口高度事件", "${trend?.elevationEvents ?: 0} 个")
             Kv("当前状态", if (trend?.isInVerticalTransit == true) "垂直运动中" else "静止")
             Kv("置信度", (trend?.confidence ?: TrendConfidence.INSUFFICIENT).label)
             Kv("拟合优度", "%.3f".format(trend?.fitRSquared ?: 0f))
@@ -184,7 +191,7 @@ fun RecordPage(state: RecorderState) {
             }
             Text(
                 text = "累计垂直位移当前 %+.1f 米；被误判污染后点这里归零"
-                    .format(trend?.elevationMeters ?: 0f),
+                    .format(state.elevationOffsetMeters),
                 color = INK_LOW,
                 fontSize = 7.sp,
             )

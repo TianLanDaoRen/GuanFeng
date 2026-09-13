@@ -113,6 +113,11 @@ class CsvSessionLogger(context: Context) {
         lightLux: Float? = null,
         /** 竖直净位移（米）：高度分类器判"人是否真的在垂直运动"靠它。 */
         verticalDisplacementM: Float? = null,
+        /**
+         * 跨窗口累计的高度位移（米）。给了就用它，没给才退回 `trend.elevationMeters`
+         * （那个是窗口内局部量，会在 ±70 米之间翻；见 RecorderState.elevationOffsetMeters）。
+         */
+        elevationOffsetMeters: Float? = null,
     ): Boolean = runCatching {
         val clock = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(timestampMs))
         val line = buildString {
@@ -126,7 +131,7 @@ class CsvSessionLogger(context: Context) {
             append(trend?.grade?.label ?: "等样本").append(',')
             append(trend?.weatherSamples ?: 0).append(',')
             append(trend?.elevationEvents ?: 0).append(',')
-            append(csvNum(trend?.elevationMeters ?: 0f, 2)).append(',')
+            append(csvNum(elevationOffsetMeters ?: trend?.elevationMeters ?: 0f, 2)).append(',')
             append(csvNum(trend?.fitRSquared ?: 0f, 3)).append(',')
             append(csvNum(trend?.windowMinutes ?: 0f, 2)).append(',')
             append(csvNum((trend?.coverageFraction ?: 0f) * 100f, 0)).append(',')

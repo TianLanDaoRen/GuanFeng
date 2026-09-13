@@ -6,6 +6,7 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.util.Log
+import com.yisiyun.guanfeng.core.HPA_PER_METER_NEAR_SEA_LEVEL
 import com.yisiyun.guanfeng.core.HourAccumulator
 import com.yisiyun.guanfeng.core.backfillCarriedOver
 import com.yisiyun.guanfeng.core.missingHourBuckets
@@ -82,6 +83,18 @@ data class RecorderState(
     val restoredSamples: Int = 0,
     /** 系统步数传感器的累计读数（用于诊断步态是否可靠）。 */
     val stepPulses: Int = 0,
+    /**
+     * **跨窗口累计**的高度偏移（米），正数表示净上升。
+     *
+     * 这才是"累计垂直位移"该显示的量：它就是每一轮解耦真正减掉的那个值
+     * （[elevationOffsetHpa] 换算成米），所以它与落盘状态、与 `weather_pressure_hpa` 列
+     * 是同一把尺子（持久化文件里 `elevation_offset_hpa = -0.101` → 这里约 +0.84 米）。
+     *
+     * **不要用 [TrendResult.elevationMeters] 显示"累计"**：那个是引擎在**当前 3 小时窗口内**
+     * 累加出来的局部量，同一段电梯在窗口里进进出出就会让它从 +70 米翻到 −70 米
+     * ——2026-09-12 夜里就是这么把主人吓着的（详见 [TrendResult.elevationMeters] 的说明）。
+     */
+    val elevationOffsetMeters: Float = 0f,
 )
 
 /**
@@ -774,6 +787,8 @@ object PressureRecorder {
                 recording = true,
                 pressureHpa = latestPressure,
                 weatherPressureHpa = latestPressure?.minus(elevationOffsetHpa),
+                // 跨窗口累计位移：与解耦用的是同一个偏移（界面显示的就是它）
+                elevationOffsetMeters = -elevationOffsetHpa / HPA_PER_METER_NEAR_SEA_LEVEL,
                 heartRateBpm = currentHeartRate,
                 restingHeartRateBpm = restingBaseline,
                 wristTemperatureC = wristTemperature,
@@ -866,6 +881,8 @@ object PressureRecorder {
                 weatherPressureHpa = weatherPressure,
                 lightLux = lightLux,
                 verticalDisplacementM = sample.verticalDisplacementM,
+                // 落盘用跨窗口累计位移：窗口内局部量会在 ±70 米之间翻，事后回看会误判成爬了 70 米
+                elevationOffsetMeters = -elevationOffsetHpa / HPA_PER_METER_NEAR_SEA_LEVEL,
             ) ?: false
 
             if (now - lastPersistMs >= PERSIST_INTERVAL_MS) {
@@ -936,6 +953,7 @@ object PressureRecorder {
                 recentFallHpa = recentFallHpa,
                 episode = episode,
                 weatherPressureHpa = weatherPressure,
+                elevationOffsetMeters = -elevationOffsetHpa / HPA_PER_METER_NEAR_SEA_LEVEL,
                 loggedRows = logger?.rowCount ?: 0,
                 logFileName = logger?.displayName ?: "",
                 logHealthy = written,
