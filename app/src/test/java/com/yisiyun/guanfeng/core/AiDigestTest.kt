@@ -46,7 +46,8 @@ class AiDigestTest {
 
         assertTrue("备注原文必须带上——那才是可分析的细节", digest.contains("起床后右侧发紧"))
         assertTrue("逐条明细要能对上时间", digest.contains(record.timestampMs.toString()))
-        assertTrue("聚合计数仍然保留", digest.contains("\"check_in_count\":1"))
+        assertTrue("聚合计数仍然保留（字段名已改为 symptom_ 前缀，见下一条测试）",
+            digest.contains("\"symptom_check_in_count\":1"))
         assertTrue("标签分布仍然保留", digest.contains("\"头痛\":1"))
         assertTrue("明细里要有 note 字段", digest.contains("\"note\":\"起床后右侧发紧\""))
     }
@@ -85,7 +86,7 @@ class AiDigestTest {
         val summary = summaryWith(emptyList())
         val digest = AiDigest.build(summary, summary, emptyList(), offset)
 
-        assertTrue(digest.contains("\"check_in_count\":0"))
+        assertTrue(digest.contains("\"symptom_check_in_count\":0"))
         assertTrue(digest.contains("\"check_in_tags\":{}"))
     }
 
@@ -120,5 +121,34 @@ class AiDigestTest {
         // 键内部的引号必须转义成 \"；键之后那个引号是 JSON 自身的闭合引号，不能转义。
         assertTrue("内部引号必须转义", digest.contains("\\\"引号"))
         assertTrue("转义后仍是合法键值", digest.contains("\\\"引号\":1"))
+    }
+    @Test
+    fun `导出的打卡计数必须自洽`() {
+        // 真机事故（2026-09-13，主人一眼看出）：JSON 里写 "check_in_count": 1，
+        // 而同一份 JSON 的 check_in_category 写着 comfort: 4 / symptom: 1 —— 两个数自相矛盾。
+        // 成因：summary.checkInCount 其实是**不适**的次数（AssociationAnalyzer 里
+        // "原先假定打卡都是症状事件"这个前提被「舒适」标签打破了），字段名却留在原地。
+        // 这条测试不假设标签怎么分类，只钉住**不变式**：总数 = 不适 + 舒适。
+        val dayStart = 20_454L * day - offset
+        val records = listOf(
+            // 一条「舒适」+ 两条「不适」：类别是**字段**（不是标签推出来的），必须显式给
+            CheckInRecord(dayStart + hour, "睡得好", "", 1002f, "", category = CATEGORY_COMFORT),
+            CheckInRecord(dayStart + 2 * hour, "疲劳", "轻", 1001f, ""),
+            CheckInRecord(dayStart + 3 * hour, "头痛", "中", 1000f, ""),
+        )
+        val summary = summaryWith(records)
+        val json = AiDigest.build(summary, summary, records, offset)
+
+        fun num(key: String): Int =
+            Regex("\"$key\":(\\d+)").find(json)?.groupValues?.get(1)?.toInt() ?: -1
+
+        assertTrue("语义含糊的 check_in_count 不许再出现", !json.contains("\"check_in_count\""))
+        val symptom = num("symptom_check_in_count")
+        val total = num("check_in_total_count")
+        val comfort = num("comfort")
+        assertTrue("三个数都得写出来（symptom=$symptom total=$total comfort=$comfort）",
+            symptom == 2 && total == 3 && comfort == 1)
+        assertEquals("总数必须等于不适 + 舒适（曾经 1 与 comfort:4 打架）", symptom + comfort, total)
+        assertTrue("总数不能小于不适数", total >= symptom)
     }
 }

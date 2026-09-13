@@ -156,8 +156,16 @@ object AiDigest {
         builder.append("\"big_swing_days\":").append(summary.bigSwingDays).append(',')
         builder.append("\"big_swing_threshold_hpa\":").append(AssociationAnalyzer.BIG_SWING_HPA).append(',')
         builder.append("\"big_swing_dates\":").append(stringArray(summary.bigSwingDayLabels)).append(',')
-        builder.append("\"check_in_count\":").append(summary.checkInCount).append(',')
-        builder.append("\"check_in_on_big_swing_days\":").append(summary.checkInsOnBigSwingDays)
+        // 【名字必须说实话】summary.checkInCount 是**不适打卡**的次数，不是打卡总数。
+        // 2026-09-13 主人一眼看出问题：JSON 里写 check_in_count: 1，
+        // 而同一份 JSON 的 check_in_category 写着 comfort: 4 / symptom: 1 —— 两个数自相矛盾。
+        // 成因见 AssociationAnalyzer 的说明：原先假定"打卡都是症状事件"，
+        // 主人加了「舒适」标签后这个前提就破了，字段名却留在原地。
+        // 现在两个都给：不适次数 + 总数（总数 = 不适 + 舒适），谁也不会读错。
+        builder.append("\"symptom_check_in_count\":").append(summary.checkInCount).append(',')
+        builder.append("\"check_in_total_count\":")
+            .append(summary.checkInCount + summary.comfortCount).append(',')
+        builder.append("\"symptom_check_ins_on_big_swing_days\":").append(summary.checkInsOnBigSwingDays)
         if (includeDaily) {
             val dailyPressure = summary.hourly
                 .groupBy { AssociationAnalyzer.dayStartOf(it.hourStartMs, zoneOffsetMs) }
