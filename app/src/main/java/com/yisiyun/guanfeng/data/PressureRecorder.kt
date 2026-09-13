@@ -1,6 +1,7 @@
 package com.yisiyun.guanfeng.data
 
 import android.content.Context
+import java.io.File
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -182,6 +183,20 @@ object PressureRecorder {
      */
     private const val LIGHT_SAMPLING_US = 5_000_000
 
+    // ── 原始流黑匣子（实验用；不在界面上留任何按钮，用 adb 建/删开关文件控制）────────────────
+    /** 开关：这个文件存在才记录。 */
+    private const val RAW_LOG_FLAG = "raw_log_on"
+    /** 输出：原始 5Hz 流（气压 / 重力 / 线加速度），格式 timestamp_ns,sensor_type,v0,v1,v2 */
+    private const val RAW_LOG_FILE = "raw_sensors.csv"
+    /**
+     * 上限 200MB ≈ 4 天（实测 15 条/秒 → 约 0.6KB/s = 2.1MB/h；气压行还带传感器温度）。
+     *
+     * 为什么要有上限：手表存储 20GB 根本不在乎这点体积（一天 47MB，一年写入约 17GB），
+     * 上限只为三件事——别让忘了删的开关无限增长、拉取分析要快、以及**别和电量测量混在一起**
+     * （开了原始记录之后功耗账就不干净了）。到顶即停，不轮转、不覆盖。
+     */
+    private const val RAW_LOG_MAX_BYTES = 200L * 1024L * 1024L
+
     /** 体感传感器（心率/腕温）的脉冲窗口长度。20 秒足够 PPG 锁定并给出十几次读数。 */
     private const val PULSE_ON_MS = 20_000L
 
@@ -279,6 +294,14 @@ object PressureRecorder {
         minAbsoluteDeltaHpa = FAST_MIN_ABSOLUTE_DELTA_HPA,
     )
     private val aggregator = SampleAggregator()
+
+    /** 原始流排队区：传感器回调只入内存，刷盘交给采样循环（回调线程不做 I/O）。 */
+    private val rawLogQueue = ArrayDeque<String>(8192)
+    private var rawLogWriter: java.io.BufferedWriter? = null
+    private var rawLogEnabled = false
+    private var rawLogBytes = 0L
+    /** 开关文件的检查时刻：每秒 15 个事件，不能每次都去 stat 文件。 */
+    private var rawLogFlagCheckedMs = 0L
     private val samples = ArrayList<PressureSample>(MAX_SAMPLES + 1)
 
     /** 累计的高度偏移（hPa）：所有被引擎判为高度事件的步进之和，跨会话持久化。 */
@@ -479,6 +502,9 @@ object PressureRecorder {
 
     @Synchronized
     fun stop() {
+        runCatching { rawLogWriter?.flush(); rawLogWriter?.close() }
+        rawLogWriter = null
+        rawLogQueue.clear()
         if (!started) return
         // 脉冲窗口可能正好开着：先显式注销，否则 PPG 会一直亮到进程被杀
         sensorManager?.let { unregisterPulse(it) }
@@ -680,12 +706,76 @@ object PressureRecorder {
         }
     }
 
+    /**
+     * 原始流黑匣子：排队一条事件（**只在内存里排队**，传感器回调线程上不做 I/O）。
+     *
+     * 开关是文件 `files/raw_log_on`：用 `adb shell touch / rm` 控制，
+     * 不为一次性实验往手表界面上加按钮（主人的规矩：界面不加没用的东西）。
+     */
+    private fun queueRawLog(timestampNs: Long, sensorType: Int, values: FloatArray) {
+        if (!rawLogEnabled) {
+            // 每秒 15 个事件，别每次都 stat 文件；每 5 秒看一次足够
+            val nowMs = System.currentTimeMillis()
+            if (nowMs - rawLogFlagCheckedMs < 5_000L) return
+            rawLogFlagCheckedMs = nowMs
+            val context = appContext ?: return
+            val dir = context.getExternalFilesDir(null) ?: context.filesDir
+            rawLogEnabled = File(dir, RAW_LOG_FLAG).exists()
+            if (!rawLogEnabled) return
+            Log.i(TAG, "原始流记录已开启（上限 ${RAW_LOG_MAX_BYTES / 1024 / 1024} MB ≈ 4 天）")
+        }
+        if (rawLogBytes > RAW_LOG_MAX_BYTES) return
+        if (rawLogQueue.size >= 20_000) return
+        val sb = StringBuilder(48)
+        sb.append(timestampNs).append(',').append(sensorType)
+        for (v in values) sb.append(',').append(v)
+        rawLogQueue.addLast(sb.toString())
+    }
+
+    /** 把排队的原始事件刷进 raw_sensors.csv（由采样循环每 5 秒调一次，顺带的那次唤醒）。 */
+    private fun flushRawLog() {
+        if (!rawLogEnabled || rawLogQueue.isEmpty()) return
+        val context = appContext ?: return
+        runCatching {
+            val dir = context.getExternalFilesDir(null) ?: context.filesDir
+            val file = File(dir, RAW_LOG_FILE)
+            // File.writer(append=true) 是 Java 的 FileWriter；Kotlin 的 writer() 只接 Charset
+            val writer = rawLogWriter ?: java.io.FileWriter(file, true).buffered().also {
+                val fresh = file.length() == 0L
+                rawLogBytes = file.length()
+                if (fresh) it.append("timestamp_ns,sensor_type,v0,v1,v2").append('\n')
+                // 每次开会话都写一行"墙上时间 ↔ 开机纳秒"映射：
+                // 原始流用的是 event.timestamp（开机纳秒），没有它就没法把回放窗口
+                // 对到"哪一段是电梯、哪一段是散步"。以 # 开头的行由解析器跳过。
+                val bootNs = android.os.SystemClock.elapsedRealtimeNanos()
+                val epochMs = System.currentTimeMillis()
+                it.append("#clock,").append(epochMs.toString()).append(',').append(bootNs.toString())
+                    .append('\n')
+                rawLogWriter = it
+            }
+            var written = 0L
+            while (rawLogQueue.isNotEmpty()) {
+                val line = rawLogQueue.removeFirst()
+                writer.append(line).append('\n')
+                written += line.length + 1
+            }
+            writer.flush()
+            rawLogBytes += written
+            if (rawLogBytes > RAW_LOG_MAX_BYTES) {
+                Log.i(TAG, "原始流记录到达上限，停止写入（删掉 $RAW_LOG_FLAG 可关闭）")
+                rawLogEnabled = false
+                rawLogQueue.clear()
+            }
+        }.onFailure { Log.w(TAG, "原始流刷盘失败: $it") }
+    }
+
     private val sensorListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
             when (event.sensor.type) {
                     Sensor.TYPE_PRESSURE -> {
                         latestPressure = event.values[0]
                         aggregator.addPressure(event.values[0])
+                        queueRawLog(event.timestamp, event.sensor.type, event.values)
                     }
 
                     Sensor.TYPE_LIGHT -> lightLux = event.values[0]
@@ -721,9 +811,13 @@ object PressureRecorder {
                         }
                     }
 
-                    Sensor.TYPE_GRAVITY -> event.values.copyInto(gravity)
+                    Sensor.TYPE_GRAVITY -> {
+                        event.values.copyInto(gravity)
+                        queueRawLog(event.timestamp, event.sensor.type, event.values)
+                    }
 
                     Sensor.TYPE_LINEAR_ACCELERATION -> {
+                        queueRawLog(event.timestamp, event.sensor.type, event.values)
                         val gMagnitude = sqrt(
                             gravity[0] * gravity[0] + gravity[1] * gravity[1] + gravity[2] * gravity[2]
                         )
@@ -841,6 +935,8 @@ object PressureRecorder {
                 Log.i(TAG, "脉冲窗口超时（墙钟），强关以免 PPG 空亮")
                 sensorManager?.let { unregisterPulse(it) }
             }
+
+            flushRawLog()
 
             val sample = aggregator.flush(now) ?: continue
 
