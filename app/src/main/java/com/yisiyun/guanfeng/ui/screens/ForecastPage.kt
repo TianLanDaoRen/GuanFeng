@@ -408,6 +408,11 @@ private fun aqiColor(aqi: String): Color = when (aqi.toIntOrNull() ?: -1) {
  */
 private fun locationSourceLabel(source: String): String = when {
     source.isBlank() -> "未知"
+    // `recalled:` 是"这次没取到新位置，沿用上次记录的坐标"。
+    // 它是个**前缀层**，要先剥掉再翻译内层，并如实说明"这是沿用的"——
+    // 第一版漏了这一层，于是真机上原样显示了 `recalled:system:gps` 这种英文黑话。
+    source.startsWith("recalled:") ->
+        locationSourceLabel(source.removePrefix("recalled:")) + "（沿用上次）"
     source.startsWith("amap:5") -> "高德 Wi-Fi（约 30 米）"
     source.startsWith("amap:1") -> "高德卫星"
     source.startsWith("amap:4") -> "高德缓存"
@@ -417,6 +422,9 @@ private fun locationSourceLabel(source: String): String = when {
         val city = source.substringAfter(':', "").takeIf { it.isNotBlank() && it != "?" }
         if (city == null) "网络推断（城市级）" else "网络推断 · $city（城市级）"
     }
-    source.startsWith("system:") -> "系统卫星"
-    else -> source
+    source.startsWith("system:gps") -> "系统卫星"
+    source.startsWith("system:") -> "系统定位"
+    // 未知代号不原样显示：那是开发者黑话（真机上会露出一串英文），
+    // 而原始代号在 CSV 的 location_source 列里一直留着，排查时看那里就够了。
+    else -> "其他方式"
 }
