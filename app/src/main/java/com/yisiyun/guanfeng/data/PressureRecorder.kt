@@ -7,7 +7,7 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.util.Log
-import com.yisiyun.guanfeng.core.HPA_PER_METER_NEAR_SEA_LEVEL
+import com.yisiyun.guanfeng.core.Barometric
 import com.yisiyun.guanfeng.core.HeartRateDisplay
 import com.yisiyun.guanfeng.core.HourAccumulator
 import com.yisiyun.guanfeng.core.backfillCarriedOver
@@ -896,7 +896,7 @@ object PressureRecorder {
                 pressureHpa = latestPressure,
                 weatherPressureHpa = latestPressure?.minus(elevationOffsetHpa),
                 // 跨窗口累计位移：与解耦用的是同一个偏移（界面显示的就是它）
-                elevationOffsetMeters = -elevationOffsetHpa / HPA_PER_METER_NEAR_SEA_LEVEL,
+                elevationOffsetMeters = Barometric.offsetToMeters(elevationOffsetHpa, latestPressure),
                 // 新鲜值优先；两次脉冲之间显示最近一次有效值（超 30 分钟才显示"—"）
                 heartRateBpm = HeartRateDisplay.pick(
                     fresh = currentHeartRate,
@@ -998,7 +998,7 @@ object PressureRecorder {
                 lightLux = lightLux,
                 verticalDisplacementM = sample.verticalDisplacementM,
                 // 落盘用跨窗口累计位移：窗口内局部量会在 ±70 米之间翻，事后回看会误判成爬了 70 米
-                elevationOffsetMeters = -elevationOffsetHpa / HPA_PER_METER_NEAR_SEA_LEVEL,
+                elevationOffsetMeters = Barometric.offsetToMeters(elevationOffsetHpa, latestPressure),
             ) ?: false
 
             if (now - lastPersistMs >= PERSIST_INTERVAL_MS) {
@@ -1069,7 +1069,7 @@ object PressureRecorder {
                 recentFallHpa = recentFallHpa,
                 episode = episode,
                 weatherPressureHpa = weatherPressure,
-                elevationOffsetMeters = -elevationOffsetHpa / HPA_PER_METER_NEAR_SEA_LEVEL,
+                elevationOffsetMeters = Barometric.offsetToMeters(elevationOffsetHpa, latestPressure),
                 loggedRows = logger?.rowCount ?: 0,
                 logFileName = logger?.displayName ?: "",
                 logHealthy = written,

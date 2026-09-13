@@ -129,7 +129,8 @@ class PressureTrendEngineTest {
 
         assertEquals(TrendGrade.STEADY, result.grade)
         assertEquals(2, result.elevationEvents)
-        assertEquals(50f, result.elevationMeters, 0.5f)
+        // 换算改用气压高度公式后，6 hPa 落差在 ~1000 hPa 处是 50.7 米（旧线性系数给 50.0）
+        assertEquals(50.74f, result.elevationMeters, 0.5f)
     }
 
     @Test

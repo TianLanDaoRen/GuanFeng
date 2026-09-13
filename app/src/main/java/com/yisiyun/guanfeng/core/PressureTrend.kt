@@ -383,7 +383,12 @@ class PressureTrendEngine(
             weatherSamples = corrected.size,
             elevationEvents = elevationEvents,
             isInVerticalTransit = inVerticalTransit,
-            elevationMeters = -elevationOffset / HPA_PER_METER_NEAR_SEA_LEVEL,
+            // 用气压高度公式换算（见 Barometric）：固定系数 0.12 在 26 层楼这种量级上
+            // 实测差 0.4 米，而在低气压基准（山城/高层）会差更多。
+            elevationMeters = Barometric.offsetToMeters(
+                offsetHpa = elevationOffset,
+                currentPressureHpa = windowed.lastOrNull()?.pressureHpa,
+            ),
             fitRSquared = rSquared,
             observedDeltaHpa = observedDelta,
             pathLengthHpa = pathLength,
