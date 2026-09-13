@@ -242,8 +242,31 @@ class SensorRateReplayTest {
             if (sp < worstSpan && t0 != elevatorStart) { worstSpan = sp; stillStart = t0 }
             t0 += step
         }
-        println("自动挑选：电梯窗口跨度=${"%.2f".format(bestSpan)} hPa 于 ${elevatorStart}；静止窗口跨度=${"%.2f".format(worstSpan)} hPa 于 ${stillStart}")
-        val scenarios = listOf("电梯" to elevatorStart, "静止" to stillStart)
+        // 第三个场景：**走走停停**——气压平但人在动（例如下电梯后在楼下走来走去取快递）。
+        // 判据用"运动强度"（|线加速度| 超过 1 m/s² 的事件占比），取最高的一段。
+        fun motionOf(startMs: Long, lenMs: Long): Float {
+            val seg = events.filter { epochMs(it.tsNs) in startMs..(startMs + lenMs) && it.type == 10 }
+            if (seg.isEmpty()) return 0f
+            return seg.count { sqrt(it.v[0] * it.v[0] + it.v[1] * it.v[1] + it.v[2] * it.v[2]) > 1f }
+                .toFloat() / seg.size
+        }
+        var walkStart = elevatorStart
+        var bestMotion = -1f
+        t0 = epochMs(events.first().tsNs)
+        while (t0 + 15 * 60_000L <= endMs) {
+            val m = motionOf(t0, 15 * 60_000L)
+            // 排除电梯那一段（它必然运动大，但我们要的是"气压平 + 人在动"）
+            if (m > bestMotion && t0 != elevatorStart && abs(spanOf(t0, 15 * 60_000L)) < 1.5f) {
+                bestMotion = m
+                walkStart = t0
+            }
+            t0 += step
+        }
+        println(
+            "自动挑选：电梯跨度=${"%.2f".format(bestSpan)} hPa；静止跨度=${"%.2f".format(worstSpan)} hPa；" +
+                "走走停停运动占比=${"%.1f".format(bestMotion * 100)}%（气压跨度 ${"%.2f".format(spanOf(walkStart, 15 * 60_000L))} hPa）",
+        )
+        val scenarios = listOf("电梯" to elevatorStart, "走走停停（楼下平地）" to walkStart, "静止" to stillStart)
         scenarios.forEach { (name, startMs) ->
             val window = events.filter { epochMs(it.tsNs) in startMs..(startMs + 15 * 60_000L) }
             runPlans(name, window, off, PressureTrendEngine(3L * 60L * 60L * 1000L, 8))
