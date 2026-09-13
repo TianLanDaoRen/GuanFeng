@@ -7,6 +7,7 @@ import android.content.Context
 import com.yisiyun.guanfeng.R
 import com.yisiyun.guanfeng.data.PendingAlertStore
 import com.yisiyun.guanfeng.core.RainLikelihood
+import com.yisiyun.guanfeng.core.TrendLabel
 import com.yisiyun.guanfeng.core.TrendResult
 import com.yisiyun.guanfeng.core.WeatherAssessment
 
@@ -61,6 +62,41 @@ object TrendNotifier {
 
     private var lastLevel: RainLikelihood? = null
     private var lastNotifiedAtMs = 0L
+
+    /**
+     * 等级与冷却时间**持久化**。
+     *
+     * 它们原先只在内存里，于是**进程每次重启都归零** → 重启后第一次评估必然被当成
+     * "等级发生了变化"（此前是 null）→ 启动就弹一条通知，而且 10 分钟冷却也一起失效。
+     * 主人 2026-09-13 报的就是这个："启动后会弹出一个通知"。
+     *
+     * 存的是"上次算出的等级"，语义与内存版一致：真正的等级变化照常提醒，
+     * 哪怕中间应用被停了好几个小时（那时等级确实可能变了，正好该提醒）。
+     */
+    private const val PREFS = "trend_notify"
+    private const val KEY_LAST_LEVEL = "last_level"
+    private const val KEY_LAST_AT = "last_notified_at"
+
+    private fun loadState(context: Context) {
+        if (loaded) return
+        loaded = true
+        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        lastLevel = p.getString(KEY_LAST_LEVEL, null)?.let { name ->
+            runCatching { RainLikelihood.valueOf(name) }.getOrNull()
+        }
+        lastNotifiedAtMs = p.getLong(KEY_LAST_AT, 0L)
+    }
+
+    private fun saveState(context: Context) {
+        runCatching {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(KEY_LAST_LEVEL, lastLevel?.name)
+                .putLong(KEY_LAST_AT, lastNotifiedAtMs)
+                .apply()
+        }
+    }
+
+    private var loaded = false
 
     /**
      * 直接驱动马达。
@@ -129,16 +165,25 @@ object TrendNotifier {
         nowMs: Long = System.currentTimeMillis(),
     ) {
         if (likelihood == RainLikelihood.UNKNOWN) return
+        loadState(context)
         val previous = lastLevel
         if (likelihood == previous) return
         lastLevel = likelihood
-        // 首次拿到结论时也提醒一次（此前是"未知"）
-        if (nowMs - lastNotifiedAtMs < MIN_INTERVAL_MS) return
+        // 首次拿到结论时也提醒一次（此前确实是"未知"：升级安装/清数据之后那一回）。
+        // 但进程重启不再算"此前未知"——等级已持久化（见 loadState 的说明）。
+        if (nowMs - lastNotifiedAtMs < MIN_INTERVAL_MS) {
+            saveState(context)
+            return
+        }
         lastNotifiedAtMs = nowMs
+        saveState(context)
 
         val body = buildString {
             previous?.let { append("由「").append(it.label).append("」变为「").append(likelihood.label).append("」 · ") }
-            append("3 小时净变 %.1f hPa".format(trend?.observedDeltaHpa ?: 0f))
+            // 标签必须由窗口长度决定：速评引擎只有 5 分钟，写"3 小时净变"就自相矛盾
+            // （观风页那个数是"速率×3 外推"，两者本来就不是同一个量）。
+            append(TrendLabel.deltaLabel(trend?.windowMinutes ?: 0f))
+            append(" ${"%.1f".format(trend?.observedDeltaHpa ?: 0f)} hPa")
             append(" · ").append(assessment.advice)
         }
         vibrateAlert(context)
