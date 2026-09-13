@@ -29,4 +29,25 @@ class TrendLabelTest {
     fun `窗口缺失时也不能写成三小时`() {
         assertEquals("近 0 分钟净变", TrendLabel.deltaLabel(0f))
     }
+
+    @Test
+    fun `被门限压平时不许写 0_0`() {
+        // 真机事故：最近 3 小时实测净变 −0.45 hPa（关联页曲线也在往下），
+        // 但因为没到 0.5 hPa 的绝对量门限，速率被强制为 0，
+        // 页面就写成了"ΔP(3h) 外推 +0.0 hPa" —— 会被读成"气压不变"。
+        assertEquals(
+            "ΔP(3h) 变化不足 0.5 hPa",
+            TrendLabel.pageDeltaLine(deltaHpaPer3h = 0f, belowThreshold = true),
+        )
+        assertEquals(
+            "达标时照常报外推值",
+            "ΔP(3h) 外推 -1.2 hPa",
+            TrendLabel.pageDeltaLine(deltaHpaPer3h = -1.2f, belowThreshold = false),
+        )
+        assertEquals(
+            "正数要带正号",
+            "ΔP(3h) 外推 +0.8 hPa",
+            TrendLabel.pageDeltaLine(deltaHpaPer3h = 0.8f, belowThreshold = false),
+        )
+    }
 }

@@ -24,6 +24,7 @@ import com.yisiyun.guanfeng.core.CorroborationEngine
 import com.yisiyun.guanfeng.core.RainLikelihood
 import com.yisiyun.guanfeng.core.TrendGrade
 import com.yisiyun.guanfeng.core.WeatherRule
+import com.yisiyun.guanfeng.core.TrendLabel
 import com.yisiyun.guanfeng.data.RecorderState
 import com.yisiyun.guanfeng.ui.components.TrendGauge
 import com.yisiyun.guanfeng.ui.theme.INK_MID
@@ -180,7 +181,11 @@ fun WeatherPage(state: RecorderState) {
                     // 预测只有 5 分钟有效（主人明确指出过）。这里只讲"这是临时结论、会越来越准"。
                     "速评 · 数据越久越准"
                 } else {
-                    "ΔP(3h) 外推 %+.1f hPa".format(trend?.deltaHpaPer3h ?: 0f)
+                    // 被门限压平时不许写 +0.0（会被读成"气压不变"）——见 TrendLabel.pageDeltaLine
+                    TrendLabel.pageDeltaLine(
+                        deltaHpaPer3h = trend?.deltaHpaPer3h ?: 0f,
+                        belowThreshold = trend?.belowThreshold == true,
+                    )
                 },
                 color = INK_LOW,
                 fontSize = 8.sp,

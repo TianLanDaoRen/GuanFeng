@@ -97,6 +97,17 @@ data class TrendResult(
     val fitRSquared: Float,
     /** 窗口内实测的绝对变压（末样本 − 首样本），单位 hPa。 */
     val observedDeltaHpa: Float,
+
+    /**
+     * **本窗口的绝对变压没到判据门限**（`minAbsoluteDeltaHpa`，默认 0.5 hPa），
+     * 于是速率被强制为 0、按平稳处理。
+     *
+     * 为什么要单独标出来：界面上写"外推 +0.0 hPa"会被读成"气压不变"，
+     * 而真相是"确实变了 −0.45，但幅度不足以支撑一个方向"——
+     * 2026-09-13 主人正是被这个显示误导（关联页曲线明明在往下）。
+     * 有了这个标志，界面可以在被压平时改说"变化不足 0.5 hPa"。
+     */
+    val belowThreshold: Boolean = false,
     /**
      * 窗口内气压曲线走过的总路程（相邻步变化量绝对值之和，hPa）。
      *
@@ -391,6 +402,7 @@ class PressureTrendEngine(
             ),
             fitRSquared = rSquared,
             observedDeltaHpa = observedDelta,
+            belowThreshold = !meaningfulTrend,
             pathLengthHpa = pathLength,
             lastElevationStepHpa = lastElevationStepHpa,
             windowMinutes = coveredMinutes,

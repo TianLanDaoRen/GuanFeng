@@ -24,6 +24,16 @@ object TrendLabel {
     /** 窗口达到这个分钟数才敢叫"3 小时"（3 小时 = 180 分钟，留一点余量）。 */
     const val FULL_WINDOW_MINUTES = 170f
 
+    /**
+     * 观风页那行的说法。
+     *
+     * 被门限压平时**不能写"+0.0"** —— 那会被读成"气压不变"，而实际是"变了但不足以支撑方向"。
+     * 这种情况直接说"变化不足 0.5 hPa"，与仪表盘上的"平稳"自洽。
+     */
+    fun pageDeltaLine(deltaHpaPer3h: Float, belowThreshold: Boolean, thresholdHpa: Float = 0.5f): String =
+        if (belowThreshold) "ΔP(3h) 变化不足 ${thresholdHpa} hPa"
+        else "ΔP(3h) 外推 %+.1f hPa".format(deltaHpaPer3h)
+
     /** 窗口内的净变标签：满窗叫"3 小时净变"，否则老实说是"近 N 分钟净变"。 */
     fun deltaLabel(windowMinutes: Float): String =
         if (windowMinutes >= FULL_WINDOW_MINUTES) "3 小时净变" else "近 ${windowMinutes.toInt()} 分钟净变"
