@@ -14,7 +14,7 @@
 ![Platform](https://img.shields.io/badge/platform-OPPO%20Watch%204%20Pro%20(OWW221)-1F6FEB?style=flat-square)
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.2-7F52FF?style=flat-square&logo=kotlin&logoColor=white)
 ![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-111%20passing-3FB950?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-144%20passing-3FB950?style=flat-square)
 ![Offline](https://img.shields.io/badge/core%20checks-no%20network-8957E5?style=flat-square)
 ![Network](https://img.shields.io/badge/weather%20%2B%20AI-optional%2C%20opt--in-6E7681?style=flat-square)
 ![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-3B7DD8?style=flat-square)
@@ -178,7 +178,7 @@
 
 手表续航是硬约束。最初的版本心率传感器**常开**，实测整机放电斜率约 **4.06 %/h**——和睡眠监测同一量级，因为它和睡眠监测一样在 24 小时开着 PPG 光电传感器。
 
-改法不是"降低回调频率"（那没用：`HEART_RATE` 的硬件上限就是 1 Hz，我们请求 5 Hz 也被钳到 1 Hz），而是**停止注册**：心率与腕温改成每 10 分钟开 20 秒，占空比 100% → **3.3%**。气压、重力、线性加速度这三个必须连续的流保持 5 Hz 不变——竖直解耦的链路是用真实数据验证过的，不动它。
+改法不是"降低回调频率"（那没用：`HEART_RATE` 的硬件上限就是 1 Hz，我们请求 5 Hz 也被钳到 1 Hz），而是**停止注册**：心率与腕温改成脉冲采样——原意是每 10 分钟开 20 秒，**但实测心率传感器仍然亮了 48% 的时间**，因为关窗靠协程 `delay(20_000)`，而手表熄屏挂起时 `delay` 走的 uptime 时钟**不走**（详见 [`docs/dev.md`](docs/dev.md) §14.5）。改成"拿到心率就关 + 按墙钟超时强关"两道闸之后才真正压到 **1.8%**。气压、重力、线性加速度这三个必须连续的流保持 5 Hz 不变——竖直解耦的链路是用真实数据验证过的，不动它。
 
 | | 整机放电斜率 |
 |---|---|
@@ -186,6 +186,31 @@
 | 心率脉冲（3.3% 占空比） | **2.98 – 3.24 %/h** |
 
 进程 CPU 占用几乎没变（3.7% → 4.1% 单核），说明省下来的确实在传感器上。
+
+**2026-09-13 再收一轮，按 `dumpsys batterystats` 的 UID 归因（同一套账的前后对比）：**
+
+| 指标 | 改前 | 改后 |
+|---|---|---|
+| 心率 / PPG 传感器注册占空比 | 7h33m ÷ 15.7h = **48%** | 10m58s ÷ 10h01m = **1.8%**（−96%） |
+| 进程 CPU 归因 | 1.13 mAh/h | **0.46 mAh/h**（−59%） |
+| 本应用总耗电归因 | 2.22 mAh/h | **1.46 mAh/h**（−34%） |
+| 传感器归因 | 1.10 mAh/h | 0.98 mAh/h |
+
+厂商「电池管家」同一时间窗的口径（份额 × 当天总掉电 42% ÷ 窗口 11.59 h）：
+
+| 项 | 占比 | 运行时长 | 折算 |
+|---|---|---|---|
+| **观风** | 24.93% | 10h01m | **≈0.90 %/h** |
+| 系统本身 | 33.63% | 10h01m | 1.22 %/h |
+| 鼾症评估 | 36.08% | 5h46m | 1.31 %/h（运行中是 2.63 %/h） |
+
+**每小时消耗已经低于系统自身**——一个 5 秒一个样本、7×24 在采集的应用，单位时间消耗低于操作系统本身。
+夜里最大的那一项也不是它，而是**鼾症评估**（PPG + 血氧全开，运行中 2.63 %/h）——这反过来印证了"手表上最贵的传感器就是 PPG"。
+整夜连续实测（关掉手表自身的睡眠休眠才有这一段）：**8342 个样本、节奏精确 5.0 秒、11.59 小时、掉电 42%（3.63 %/h）**。
+
+> 诚实边界：两个口径（AOSP 的 `batterystats` 与厂商管家）在**绝对值上差 3~4 倍**，
+> 所以绝对值不定论，**两边一致的只有排序**；上面那些"改前 / 改后"的比例是同一套账算的，**比例可信**。
+> 机制、换算口径、以及三个 bug 的现场记录都在 [`docs/dev.md`](docs/dev.md) §十四。
 
 <br/>
 
@@ -219,6 +244,7 @@
 - **天气数据与自家气压计的比对还没做过**：这是天气采集存在的理由，也是下一步要做的事。
 - **户外 GPS 仍未验证**：室内锁不上星是预期内的（户外才是它的场景），但户外实际要多久、精度多少，没有测过。
 - **手表进睡眠模式会停掉一切应用**，而且不会自己回来——所以夜间必然有数小时空白。这不是故障，是平台设计；应用里做了断档即停、锁存过时即丢、归档补齐三件事来如实处理它。
+- **功耗只有"同账比例"可信，绝对值不定论**：AOSP 的 `batterystats` 与厂商电池管家在绝对值上差 3~4 倍，谁的 mAh 都不当权威；两边一致的只有排序（见「关于耗电」）。
 - **这不是一个上架产品**，是自己戴的东西。
 
 完整的未验证清单、"算法在收集期内改过"的逐条记录、以及每一处取舍的理由，都在 **[`docs/dev.md`](docs/dev.md)**。
@@ -236,7 +262,7 @@ JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
 
 - Android 11（API 30）设备，`minSdk 27` / `targetSdk 37`
 - 需要 Android Studio 自带的 JBR（工程要求 `toolchainVersion=25`）
-- **111 个单元测试**全部运行在 JVM 上，**不依赖手表**：
+- **144 个单元测试**全部运行在 JVM 上，**不依赖手表**：
 
 ```bash
 ./gradlew :app:testDebugUnitTest
@@ -248,7 +274,7 @@ JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
 
 | 文件 | 内容 |
 |---|---|
-| [`docs/dev.md`](docs/dev.md) | 开发者文档：算法推导、真机实测结论、阈值出处、未验证清单；天气与定位整条链路在 **§9.12** |
+| [`docs/dev.md`](docs/dev.md) | 开发者文档：算法推导、真机实测结论、阈值出处、未验证清单；天气与定位整条链路在 **§9.12**，功耗优化与三个 bug 的机制在 **§十四** |
 | [`docs/screenshots/`](docs/screenshots/) | 界面截图（`07-qweather.webp` = 负一屏天气预报） |
 | [`docs/assets/`](docs/assets/) | 图标（SVG 源 + PNG） |
 
