@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yisiyun.guanfeng.core.MarkdownLite
+import com.yisiyun.guanfeng.ui.theme.INK_HIGH
 
 /**
  * 极简 Markdown 渲染。
@@ -35,7 +36,7 @@ import com.yisiyun.guanfeng.core.MarkdownLite
 fun MarkdownText(
     raw: String,
     modifier: Modifier = Modifier,
-    color: Color = Color(0xFFE0E0E0),
+    color: Color = INK_HIGH,
     baseSize: TextUnit = 9.sp,
     lineHeight: TextUnit = 13.sp,
 ) {
@@ -81,7 +82,7 @@ private fun inlineOf(text: String, color: Color): AnnotatedString = buildAnnotat
     MarkdownLite.inline(text).forEach { segment ->
         withStyle(
             if (segment.bold) {
-                SpanStyle(fontWeight = FontWeight.Bold, color = Color.White)
+                SpanStyle(fontWeight = FontWeight.Bold, color = INK_HIGH)
             } else {
                 SpanStyle(color = color)
             }

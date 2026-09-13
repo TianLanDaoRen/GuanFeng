@@ -41,8 +41,11 @@ import com.yisiyun.guanfeng.data.CheckInLogger
 import com.yisiyun.guanfeng.data.CheckInSignal
 import com.yisiyun.guanfeng.data.RecorderState
 import com.yisiyun.guanfeng.ui.components.PageHeader
-import com.yisiyun.guanfeng.ui.components.SUBTITLE_GRAY
+import com.yisiyun.guanfeng.ui.components.SUBTITLE_INK
 import kotlinx.coroutines.delay
+import com.yisiyun.guanfeng.ui.theme.INK_MID
+import com.yisiyun.guanfeng.ui.theme.INK_LOW
+import com.yisiyun.guanfeng.ui.theme.INK_HIGH
 
 /**
  * 第三屏 · 体感打卡：把此刻的体感与此刻的气压绑在一起。
@@ -127,7 +130,7 @@ fun CheckInPage(state: RecorderState) {
             title = "体感打卡",
             titleColor = Color(0xFFF2C14E),
             subtitle = feedback ?: "今日 $todayCount 次",
-            subtitleColor = if (feedback != null) Color(0xFF6EE7A8) else SUBTITLE_GRAY,
+            subtitleColor = if (feedback != null) Color(0xFF6EE7A8) else SUBTITLE_INK,
         )
 
         // ── 第一级：类别（互斥，必选） ────────────────────────────────
@@ -217,11 +220,11 @@ fun CheckInPage(state: RecorderState) {
                         shape = RoundedCornerShape(6.dp),
                     )
                     .padding(horizontal = 6.dp, vertical = 3.dp),
-                textStyle = TextStyle(color = Color.White, fontSize = 10.sp),
+                textStyle = TextStyle(color = INK_HIGH, fontSize = 10.sp),
                 singleLine = true,
                 decorationBox = { inner ->
                     if (note.isEmpty()) {
-                        Text("备注（可选）", color = Color(0xFF5E5E5E), fontSize = 9.sp)
+                        Text("备注（可选）", color = INK_LOW, fontSize = 9.sp)
                     }
                     inner()
                 },
@@ -270,7 +273,7 @@ fun CheckInPage(state: RecorderState) {
                 },
             contentAlignment = Alignment.Center,
         ) {
-            Text("记录", color = Color.White, fontSize = 12.sp)
+            Text("记录", color = INK_HIGH, fontSize = 12.sp)
         }
     }
 }
@@ -311,7 +314,7 @@ private fun CategoryToggle(
             ) {
                 Text(
                     text = label,
-                    color = if (selected) Color(0xFF141414) else Color(0xFF8A8A8A),
+                    color = if (selected) Color(0xFF141414) else INK_LOW,
                     fontSize = 11.sp,
                 )
             }
@@ -348,7 +351,7 @@ private fun Chip(
     ) {
         Text(
             text = label,
-            color = if (selected) Color(0xFFDCEBFA) else Color(0xFFB4B4B4),
+            color = if (selected) Color(0xFFDCEBFA) else INK_LOW,
             fontSize = 11.sp,
         )
     }

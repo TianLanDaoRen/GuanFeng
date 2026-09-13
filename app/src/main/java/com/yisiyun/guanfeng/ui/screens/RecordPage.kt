@@ -23,7 +23,7 @@ import com.yisiyun.guanfeng.core.WeatherRule
 import com.yisiyun.guanfeng.data.PressureRecorder
 import com.yisiyun.guanfeng.data.RecorderState
 import com.yisiyun.guanfeng.ui.components.PageHeader
-import com.yisiyun.guanfeng.ui.components.SUBTITLE_GRAY
+import com.yisiyun.guanfeng.ui.components.SUBTITLE_INK
 import com.yisiyun.guanfeng.log.WeatherObservation
 import com.yisiyun.guanfeng.service.AlertState
 import com.yisiyun.guanfeng.service.TrendNotifier
@@ -42,6 +42,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import com.yisiyun.guanfeng.log.WeatherObservationLogger
+import com.yisiyun.guanfeng.ui.theme.INK_MID
+import com.yisiyun.guanfeng.ui.theme.INK_LOW
+import com.yisiyun.guanfeng.ui.theme.INK_HIGH
 
 /**
  * 第五屏 · 记录：这一屏存在的意义是让「它到底有没有在记」一眼可见、可以自己验证。
@@ -77,7 +80,7 @@ fun RecordPage(state: RecorderState) {
                 append(if (state.logHealthy) "落盘正常" else "写入异常")
             },
             subtitleColor = if (state.recording && state.logHealthy) {
-                SUBTITLE_GRAY
+                SUBTITLE_INK
             } else {
                 Color(0xFFFF7A6B)
             },
@@ -93,7 +96,7 @@ fun RecordPage(state: RecorderState) {
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
-            Text("前台服务 + indicator 保活中", color = Color(0xFF5E5E5E), fontSize = 7.sp)
+            Text("前台服务 + indicator 保活中", color = INK_LOW, fontSize = 7.sp)
 
             Spacer(Modifier.height(4.dp))
             Kv("会话时长", formatDuration(state.elapsedSeconds))
@@ -120,7 +123,7 @@ fun RecordPage(state: RecorderState) {
                 Text("判定依据", color = Color(0xFFF2C14E), fontSize = 9.sp)
                 Text(
                     text = rationale,
-                    color = Color(0xFFB4B4B4),
+                    color = INK_HIGH,
                     fontSize = 8.sp,
                     lineHeight = 11.sp,
                 )
@@ -158,7 +161,7 @@ fun RecordPage(state: RecorderState) {
                 } else {
                     "按下后 5 秒才震。趁这 5 秒退出应用或熄屏——震了说明服务能调起震动，没震说明这条链路不通"
                 },
-                color = Color(0xFF6E6E6E),
+                color = INK_LOW,
                 fontSize = 7.sp,
             )
 
@@ -179,7 +182,7 @@ fun RecordPage(state: RecorderState) {
             Text(
                 text = "累计垂直位移当前 %+.1f 米；被误判污染后点这里归零"
                     .format(trend?.elevationMeters ?: 0f),
-                color = Color(0xFF6E6E6E),
+                color = INK_LOW,
                 fontSize = 7.sp,
             )
 
@@ -225,14 +228,14 @@ fun RecordPage(state: RecorderState) {
                 } else {
                     "今日 $observedToday 次 · 下雨/起风时随手点一下"
                 },
-                color = Color(0xFF6E6E6E),
+                color = INK_LOW,
                 fontSize = 7.sp,
             )
 
             Spacer(Modifier.height(6.dp))
             Text(
                 text = "每 5 秒一个样本 · 正式窗口 3 小时 · 风雨倾向为启发式规则、未用真实降水校准",
-                color = Color(0xFF4E4E4E),
+                color = INK_LOW,
                 fontSize = 7.sp,
                 lineHeight = 10.sp,
             )
@@ -246,7 +249,7 @@ private fun Kv(label: String, value: String) {
         // 标签占剩余空间、值取自身宽度并右对齐：固定比例的 Spacer 会把长值挤没
         Text(
             text = label,
-            color = Color(0xFF8A8A8A),
+            color = INK_MID,
             fontSize = 9.sp,
             maxLines = 1,
             modifier = Modifier.weight(1f),

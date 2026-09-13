@@ -3,6 +3,7 @@ package com.yisiyun.guanfeng.data
 import android.content.Context
 import com.yisiyun.guanfeng.core.CATEGORY_SYMPTOM
 import com.yisiyun.guanfeng.core.TrendResult
+import com.yisiyun.guanfeng.log.csvNum
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -60,18 +61,18 @@ class CheckInLogger(context: Context) {
         val line = listOf(
             timestampMs.toString(),
             dateTime,
-            pressureHpa?.let { "%.2f".format(it) } ?: "",
-            trend?.deltaHpaPer3h?.let { "%.2f".format(it) } ?: "",
-            trend?.rateHpaPerHour?.let { "%.3f".format(it) } ?: "",
-            trend?.elevationMeters?.let { "%.1f".format(it) } ?: "",
-            heartRateBpm?.let { "%.0f".format(it) } ?: "",
-            wristTemperatureC?.let { "%.1f".format(it) } ?: "",
-            lightLux?.let { "%.0f".format(it) } ?: "",
+            csvNum(pressureHpa, 2),
+            csvNum(trend?.deltaHpaPer3h, 2),
+            csvNum(trend?.rateHpaPerHour, 3),
+            csvNum(trend?.elevationMeters, 1),
+            csvNum(heartRateBpm, 0),
+            csvNum(wristTemperatureC, 1),
+            csvNum(lightLux, 0),
             tags,
             intensity,
             // 逗号是分隔符，正文里的半角逗号换成全角，避免破坏列结构。
             note.replace(',', '，'),
-            weatherPressureHpa?.let { "%.2f".format(it) } ?: "",
+            csvNum(weatherPressureHpa, 2),
             category,
         ).joinToString(",")
         file.appendText(line + "\n")

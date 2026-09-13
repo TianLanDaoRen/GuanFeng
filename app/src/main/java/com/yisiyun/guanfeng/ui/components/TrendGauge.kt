@@ -20,6 +20,8 @@ import com.yisiyun.guanfeng.core.RainLikelihood
 import com.yisiyun.guanfeng.core.TrendGrade
 import kotlin.math.cos
 import kotlin.math.sin
+import com.yisiyun.guanfeng.ui.theme.INK_MID
+import com.yisiyun.guanfeng.ui.theme.INK_HIGH
 
 /**
  * 趋势环形仪表。
@@ -94,13 +96,13 @@ fun TrendGauge(
                 center.y + direction.y * (radius - stroke * 1.9f),
             )
             drawLine(
-                color = Color.White,
+                color = INK_HIGH,
                 start = inner,
                 end = outer,
                 strokeWidth = stroke * 0.42f,
                 cap = StrokeCap.Round,
             )
-            drawCircle(color = Color.White, radius = stroke * 0.42f, center = outer)
+            drawCircle(color = INK_HIGH, radius = stroke * 0.42f, center = outer)
         }
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -115,13 +117,13 @@ fun TrendGauge(
             } else {
                 Text(
                     text = "观察中",
-                    color = Color(0xFF9A9A9A),
+                    color = INK_HIGH,
                     fontSize = 20.sp,
                 )
             }
             Text(
                 text = "风雨倾向",
-                color = Color(0xFF8A8A8A),
+                color = INK_MID,
                 fontSize = 9.sp,
             )
             Text(
@@ -152,5 +154,5 @@ fun likelihoodColor(likelihood: RainLikelihood): Color = when (likelihood) {
     RainLikelihood.HIGH -> Color(0xFFFF7A6B)
     RainLikelihood.MEDIUM -> Color(0xFFF2C14E)
     RainLikelihood.LOW -> Color(0xFF6EE7A8)
-    RainLikelihood.UNKNOWN -> Color(0xFF8A8A8A)
+    RainLikelihood.UNKNOWN -> INK_HIGH
 }

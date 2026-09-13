@@ -17,6 +17,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yisiyun.guanfeng.data.RecorderState
 import com.yisiyun.guanfeng.ui.components.PageHeader
+import com.yisiyun.guanfeng.ui.theme.INK_MID
+import com.yisiyun.guanfeng.ui.theme.INK_LOW
 
 /**
  * 第二屏 · 体感：环境侧与身体侧并置。
@@ -102,15 +104,15 @@ private fun ReadingRow(
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(text = label, color = Color(0xFF8A8A8A), fontSize = 9.sp)
+            Text(text = label, color = INK_MID, fontSize = 9.sp)
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(text = value, color = color, fontSize = if (small) 15.sp else 20.sp)
                 Spacer(Modifier.fillMaxWidth(0.04f))
-                Text(text = unit, color = Color(0xFF7A7A7A), fontSize = 8.sp)
+                Text(text = unit, color = INK_LOW, fontSize = 8.sp)
             }
         }
         if (hint != null) {
-            Text(text = hint, color = Color(0xFF5E5E5E), fontSize = 7.sp)
+            Text(text = hint, color = INK_LOW, fontSize = 7.sp)
         }
     }
 }

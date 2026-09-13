@@ -26,6 +26,9 @@ import com.yisiyun.guanfeng.core.TrendGrade
 import com.yisiyun.guanfeng.core.WeatherRule
 import com.yisiyun.guanfeng.data.RecorderState
 import com.yisiyun.guanfeng.ui.components.TrendGauge
+import com.yisiyun.guanfeng.ui.theme.INK_MID
+import com.yisiyun.guanfeng.ui.theme.INK_LOW
+import com.yisiyun.guanfeng.ui.theme.INK_HIGH
 
 /**
  * 第一屏 · 观风。
@@ -107,7 +110,7 @@ fun WeatherPage(state: RecorderState) {
             ) {
                 Text(
                     text = if (trend?.isInVerticalTransit == true) "运动中" else "静止",
-                    color = if (trend?.isInVerticalTransit == true) Color(0xFFF2C14E) else Color(0xFF9A9A9A),
+                    color = if (trend?.isInVerticalTransit == true) Color(0xFFF2C14E) else INK_MID,
                     fontSize = 9.sp,
                 )
             }
@@ -136,7 +139,7 @@ fun WeatherPage(state: RecorderState) {
             if (hasConclusion) {
                 Text(
                     text = assessment?.advice ?: "",
-                    color = Color.White,
+                    color = INK_HIGH,
                     fontSize = 14.sp,
                     textAlign = TextAlign.Center,
                 )
@@ -148,7 +151,7 @@ fun WeatherPage(state: RecorderState) {
             if (!hasConclusion) {
                 Text(
                     text = assessment?.shortReason ?: "样本不足",
-                    color = Color(0xFF8A8A8A),
+                    color = INK_HIGH,
                     fontSize = 12.sp,
                     textAlign = TextAlign.Center,
                 )
@@ -175,7 +178,7 @@ fun WeatherPage(state: RecorderState) {
                 } else {
                     "ΔP(3h) 外推 %+.1f hPa".format(trend?.deltaHpaPer3h ?: 0f)
                 },
-                color = Color(0xFF6E6E6E),
+                color = INK_LOW,
                 fontSize = 8.sp,
             )
         }

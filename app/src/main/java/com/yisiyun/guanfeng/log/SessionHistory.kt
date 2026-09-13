@@ -139,31 +139,33 @@ object SessionHistory {
      *
      * 注意：返回的第一行**不是表头**（表头在文件开头）。要按列名解析，
      * 得另外读一次首行——见 [loadTailHourlyBuckets]。
+     *
+     * **装满上限时保留的是最后那些行**（`takeLast`），不是最前那些行：
+     * 这个窗口就是给"3 小时窗口续接"和"归档修补"用的，要的永远是**最新**的一段。
+     * 第一版写的是"攒满 `MAX_ROWS_SCANNED` 就不再往里加"，那等于留下窗口里**最旧**的两万行、
+     * 把最新的一段丢掉——比不设上限还坏，因为它不报错、也不变慢。
      */
-    private fun readTailLines(file: File, maxBytes: Long = TAIL_BYTES): List<String> {
-        val lines = ArrayList<String>()
-        file.inputStream().use { input ->
+    internal fun readTailLines(file: File, maxBytes: Long = TAIL_BYTES): List<String> {
+        val (text, truncated) = file.inputStream().use { input ->
             val channel = input.channel
             val size = channel.size()
             val startAt = (size - maxBytes).coerceAtLeast(0L)
             channel.position(startAt)
-            val text = input.reader(Charsets.UTF_8).readText()
-            val usable = if (startAt > 0L) text.substringAfter('\n', text) else text
-            usable.lineSequence().forEach { line ->
-                if (line.isNotBlank()) lines += line
-                if (lines.size >= MAX_ROWS_SCANNED) return@forEach
-            }
+            input.reader(Charsets.UTF_8).readText() to (startAt > 0L)
         }
-        return lines
+        val usable = if (truncated) text.substringAfter('\n', text) else text
+        return usable.lineSequence()
+            .filter { it.isNotBlank() }
+            .toList()
+            .takeLast(MAX_ROWS_SCANNED)
     }
 
     /**
      * 把采样文件**尾部**折叠成小时桶，供归档修补使用（见 [missingHourBuckets]）。
      *
-     * 为什么不复用 [loadHourlyRollup]：那个是**从文件开头**逐行扫、且扫满
-     * `MAX_ROWS_SCANNED`（2 万行）就 break。文件现在约 1.7 万行/天还在长，
-     * 一旦超过 2 万行，它看到的永远是最旧那一段，**最需要修补的最近那几个小时反而扫不到**。
-     * 修补只关心最近，所以直接读尾部。
+     * 为什么不复用 [loadHourlyRollup]：那个要**从文件开头**逐行扫完整份
+     * （它服务的是"全部历史迁移"和按天窗口，没法假定数据在尾部），
+     * 而 30MB 文件是 25 万行。修补只关心最近一小时上下，读尾部就够了。
      *
      * 表头必须单独从文件首行取：尾部读出来的第一行是被切断的半行数据。
      */
@@ -244,21 +246,62 @@ object SessionHistory {
                     val iPressure = if (iWeather >= 0) iWeather else iRaw
                     if (iPressure < 0) return@useLines
 
-                    var scanned = 0
-                    while (iterator.hasNext()) {
-                        val line = iterator.next()
-                        scanned++
-                        if (scanned > MAX_ROWS_SCANNED) break
-                        val cells = line.split(',')
-                        val timestamp = cells.getOrNull(iTimestamp)?.toLongOrNull() ?: continue
-                        if (timestamp < cutoff) continue
-                        val pressure = cells.getOrNull(iPressure)?.toFloatOrNull() ?: continue
-                        accumulator.add(timestamp, pressure)
-                    }
+                    feedRollup(
+                        lines = iterator.asSequence(),
+                        iTimestamp = iTimestamp,
+                        iPressure = iPressure,
+                        cutoff = cutoff,
+                        accumulator = accumulator,
+                    )
                 }
             }
         }
         return accumulator.buckets().filter { it.hourStartMs >= cutoff }
+    }
+
+    /**
+     * 把一段 CSV 行喂进小时桶（纯函数：不碰 Context、不开文件，好让"截断"这类错误能被单测钉死）。
+     *
+     * ## 这里为什么**没有**"扫满几万行就停"
+     *
+     * 原先有一道 `if (scanned > MAX_ROWS_SCANNED) break`，而且是从**文件开头**扫。
+     * 文件现在约 1.7 万行/天、上限 30MB（约 25 万行），所以跨过两万行之后，
+     * 它看到的**永远是最旧那一段**——最近的数据被静默丢掉，还符合"没报错、也没变慢"的假象。
+     * 最直接的受害者是首次归档迁移（[ALL_HISTORY_DAYS]，本该把整份历史搬进归档），
+     * 它只会搬最旧的两万行。
+     *
+     * 现在改为：**先用行首的时间戳做一次廉价筛选**（只取第一个逗号前那一段，
+     * 不 split 整行），窗口外的行直接跳过。25 万行里绝大多数都落在窗口之外，
+     * 省下的正是这些行的整行拆分——代价可以接受，而"少读一段历史"不可接受。
+     */
+    internal fun feedRollup(
+        lines: Sequence<String>,
+        iTimestamp: Int,
+        iPressure: Int,
+        cutoff: Long,
+        accumulator: com.yisiyun.guanfeng.core.HourlyAccumulator,
+    ) {
+        // 采样文件的表头永远是 timestamp_ms 打头（唯一写入方是 CsvSessionLogger），
+        // 所以常走的都是"廉价筛选"这条路；万一哪天列序变了，下面的分支仍按列名解析。
+        val timestampFirst = iTimestamp == 0
+        for (line in lines) {
+            if (line.isBlank()) continue
+            val cells: List<String>
+            val timestamp: Long
+            if (timestampFirst) {
+                val comma = line.indexOf(',')
+                if (comma <= 0) continue
+                timestamp = line.substring(0, comma).toLongOrNull() ?: continue
+                if (timestamp < cutoff) continue
+                cells = line.split(',')
+            } else {
+                cells = line.split(',')
+                timestamp = cells.getOrNull(iTimestamp)?.toLongOrNull() ?: continue
+                if (timestamp < cutoff) continue
+            }
+            val pressure = cells.getOrNull(iPressure)?.toFloatOrNull() ?: continue
+            accumulator.add(timestamp, pressure)
+        }
     }
 
     /** 传这个天数表示「全部可用历史」，不受时间窗裁剪。 */
@@ -274,23 +317,23 @@ object SessionHistory {
         val file = File(directory, SAMPLE_FILE).takeIf { it.isFile } ?: return emptyList()
 
         return runCatching {
-            file.bufferedReader().useLines { sequence ->
-                val iterator = sequence.iterator()
-                if (!iterator.hasNext()) return@useLines emptyList()
-                val header = iterator.next().split(',')
-                val iTimestamp = header.indexOf("timestamp_ms")
-                val iLight = header.indexOf("light_lux")
-                if (iTimestamp < 0 || iLight < 0) return@useLines emptyList()
-                val result = ArrayList<Pair<Long, Float>>()
-                while (iterator.hasNext()) {
-                    val cells = iterator.next().split(',')
-                    val timestamp = cells.getOrNull(iTimestamp)?.toLongOrNull() ?: continue
-                    if (timestamp < sinceMs || timestamp > nowMs) continue
-                    val lux = cells.getOrNull(iLight)?.toFloatOrNull() ?: continue
-                    result += timestamp to lux
-                }
-                result.sortedBy { it.first }
+            // 表头从**文件第一行**读（尾部窗口里没有表头），与 [loadTailHourlyBuckets] 同一条规矩
+            val header = file.bufferedReader().use { it.readLine() }?.split(',') ?: return emptyList()
+            val iTimestamp = header.indexOf("timestamp_ms")
+            val iLight = header.indexOf("light_lux")
+            if (iTimestamp < 0 || iLight < 0) return emptyList()
+            val result = ArrayList<Pair<Long, Float>>()
+            // 只读尾部 2MB（约 27 小时），不从文件开头扫：它的窗口只有 10 分钟
+            // （调用方传 LIGHT_TREND_WINDOW_MS），却跑在**每次启动**的路径上——
+            // 文件长到 30MB 时，从头扫一遍就是白等几百毫秒。
+            for (line in readTailLines(file)) {
+                val cells = line.split(',')
+                val timestamp = cells.getOrNull(iTimestamp)?.toLongOrNull() ?: continue
+                if (timestamp < sinceMs || timestamp > nowMs) continue
+                val lux = cells.getOrNull(iLight)?.toFloatOrNull() ?: continue
+                result += timestamp to lux
             }
+            result.sortedBy { it.first }
         }.getOrElse { emptyList() }
     }
 
@@ -365,14 +408,14 @@ object SessionHistory {
         val directory = context.getExternalFilesDir(null) ?: context.filesDir
         val text = buildString {
             append(KEY_RESTING_HR).append('=')
-            append(restingHeartRateBpm?.let { "%.1f".format(it) } ?: "").append('\n')
-            append(KEY_ELEVATION_OFFSET).append('=').append("%.3f".format(elevationOffsetHpa)).append('\n')
+            append(csvNum(restingHeartRateBpm, 1)).append('\n')
+            append(KEY_ELEVATION_OFFSET).append('=').append(csvNum(elevationOffsetHpa, 3)).append('\n')
             if (episode != null) {
                 append(KEY_EPISODE_ACTIVE).append('=').append(if (episode.active) "1" else "0").append('\n')
-                append(KEY_EPISODE_PEAK).append('=').append("%.3f".format(episode.peakHpa)).append('\n')
-                append(KEY_EPISODE_MIN).append('=').append("%.3f".format(episode.minHpa)).append('\n')
+                append(KEY_EPISODE_PEAK).append('=').append(csvNum(episode.peakHpa, 3)).append('\n')
+                append(KEY_EPISODE_MIN).append('=').append(csvNum(episode.minHpa, 3)).append('\n')
                 append(KEY_EPISODE_START_MS).append('=').append(episode.startMs).append('\n')
-                append(KEY_EPISODE_DROP).append('=').append("%.3f".format(episode.dropHpa)).append('\n')
+                append(KEY_EPISODE_DROP).append('=').append(csvNum(episode.dropHpa, 3)).append('\n')
                 append(KEY_EPISODE_WRITTEN_MS).append('=').append(System.currentTimeMillis()).append('\n')
             }
         }

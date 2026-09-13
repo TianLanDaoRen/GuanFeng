@@ -19,6 +19,7 @@ import com.yisiyun.guanfeng.core.PressureTrendEngine
 import com.yisiyun.guanfeng.core.SampleAggregator
 import com.yisiyun.guanfeng.core.TrendResult
 import com.yisiyun.guanfeng.log.CsvSessionLogger
+import com.yisiyun.guanfeng.log.csvNum
 import com.yisiyun.guanfeng.log.HourlyArchive
 import com.yisiyun.guanfeng.log.PowerLogger
 import com.yisiyun.guanfeng.service.AlertState
@@ -372,7 +373,7 @@ object PressureRecorder {
                     episodeTracker.restore(saved)
                     Log.i(
                         TAG,
-                        "恢复天气过程：active=${saved.active} 降幅=${"%.2f".format(saved.dropHpa)} " +
+                        "恢复天气过程：active=${saved.active} 降幅=${csvNum(saved.dropHpa, 2)} " +
                             "快照年龄=${ageMs / 60000} 分钟",
                     )
                 } else {

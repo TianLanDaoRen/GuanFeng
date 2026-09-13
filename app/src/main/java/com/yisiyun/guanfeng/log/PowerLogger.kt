@@ -57,11 +57,11 @@ object PowerLogger {
         val line = listOf(
             System.currentTimeMillis().toString(),
             SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date()),
-            "%.1f".format(appElapsedMs / 60000.0),
+            csvNum(appElapsedMs / 60000.0, 1),
             Process.getElapsedCpuTime().toString(),
             battery?.first?.toString() ?: "",
             battery?.second?.toString() ?: "",
-            battery?.third?.let { "%.1f".format(it) } ?: "",
+            csvNum(battery?.third, 1),
             samplesLogged.toString(),
         ).joinToString(",")
         target.appendText(line + "\n")

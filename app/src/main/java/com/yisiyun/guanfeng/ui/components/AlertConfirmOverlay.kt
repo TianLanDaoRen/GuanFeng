@@ -26,6 +26,8 @@ import com.yisiyun.guanfeng.data.PendingAlert
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.yisiyun.guanfeng.ui.theme.INK_LOW
+import com.yisiyun.guanfeng.ui.theme.INK_HIGH
 
 /**
  * 待确认提醒弹层。
@@ -61,7 +63,7 @@ fun AlertConfirmOverlay(
             Spacer(Modifier.weight(0.05f))
             Text("天气提醒", color = Color(0xFFF2C14E), fontSize = 12.sp)
             Spacer(Modifier.weight(1f))
-            Text(time, color = Color(0xFF6E6E6E), fontSize = 8.sp)
+            Text(time, color = INK_LOW, fontSize = 8.sp)
         }
         Spacer(Modifier.height(6.dp))
 
@@ -69,21 +71,21 @@ fun AlertConfirmOverlay(
         Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Text(
                 text = alert.title,
-                color = Color.White,
+                color = INK_HIGH,
                 fontSize = 13.sp,
                 lineHeight = 17.sp,
             )
             Spacer(Modifier.height(6.dp))
             Text(
                 text = alert.text,
-                color = Color(0xFFC8C8C8),
+                color = INK_HIGH,
                 fontSize = 9.sp,
                 lineHeight = 13.sp,
             )
             Spacer(Modifier.height(6.dp))
             Text(
                 text = "样本量小，仅供参考，非医学建议",
-                color = Color(0xFF5E5E5E),
+                color = INK_LOW,
                 fontSize = 7.sp,
             )
         }

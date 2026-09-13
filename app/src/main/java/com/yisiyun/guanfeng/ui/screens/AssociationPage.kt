@@ -53,7 +53,7 @@ import com.yisiyun.guanfeng.data.CheckInSignal
 import com.yisiyun.guanfeng.data.PressureRecorder
 import com.yisiyun.guanfeng.data.RecorderState
 import com.yisiyun.guanfeng.ui.components.PageHeader
-import com.yisiyun.guanfeng.ui.components.SUBTITLE_GRAY
+import com.yisiyun.guanfeng.ui.components.SUBTITLE_INK
 import com.yisiyun.guanfeng.log.CheckInHistory
 import com.yisiyun.guanfeng.log.HourlyArchive
 import com.yisiyun.guanfeng.log.SessionHistory
@@ -63,6 +63,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.yisiyun.guanfeng.ui.theme.INK_MID
+import com.yisiyun.guanfeng.ui.theme.INK_LOW
+import com.yisiyun.guanfeng.ui.theme.INK_HIGH
 
 /** 「气压 × 体感」页的观察周期。 */
 private const val PERIOD_DAYS = 7
@@ -252,12 +255,12 @@ fun AssociationPage(state: RecorderState) {
             )
 
             if (loading || current == null) {
-                Text("汇总中…", color = Color(0xFF8A8A8A), fontSize = 10.sp)
+                Text("汇总中…", color = INK_HIGH, fontSize = 10.sp)
             } else if (current.hourly.isEmpty()) {
-                Text("还没有历史数据", color = Color(0xFF8A8A8A), fontSize = 10.sp)
+                Text("还没有历史数据", color = INK_HIGH, fontSize = 10.sp)
                 Text(
                     text = "小时级汇总从现在开始积累，攒够一天就能看到曲线",
-                    color = Color(0xFF5E5E5E),
+                    color = INK_LOW,
                     fontSize = 8.sp,
                     lineHeight = 11.sp,
                 )
@@ -355,7 +358,7 @@ fun AssociationPage(state: RecorderState) {
                     Text(
                         text = "数据不足：需至少 1 天气压记录与 1 次体感打卡（当前 ${current.daysWithData} 天 / " +
                             "$reportCheckIns 次）",
-                        color = Color(0xFF8A8A8A),
+                        color = INK_HIGH,
                         fontSize = 8.sp,
                         lineHeight = 10.sp,
                     )
@@ -401,7 +404,7 @@ private fun ConsentOverlay(onCancel: () -> Unit, onConfirm: () -> Unit) {
             .background(Color(0xFF0A0A0A))
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
-        Text("需要联网", color = Color.White, fontSize = 13.sp)
+        Text("需要联网", color = INK_HIGH, fontSize = 13.sp)
         Spacer(Modifier.height(6.dp))
         Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Text(
@@ -410,7 +413,7 @@ private fun ConsentOverlay(onCancel: () -> Unit, onConfirm: () -> Unit) {
                     "· 你的体感打卡记录（含手写备注原文）与天气实况" + "\n\n" +
                     "不会上传：" + "\n" +
                     "设备标识、账号身份、体征逐点读数。",
-                color = Color(0xFFC8C8C8),
+                color = INK_HIGH,
                 fontSize = 9.sp,
                 lineHeight = 13.sp,
             )
@@ -429,7 +432,7 @@ private fun ConsentOverlay(onCancel: () -> Unit, onConfirm: () -> Unit) {
                     .clickable { onCancel() },
                 contentAlignment = Alignment.Center,
             ) {
-                Text("取消", color = Color(0xFFB0B0B0), fontSize = 11.sp)
+                Text("取消", color = INK_MID, fontSize = 11.sp)
             }
             Box(
                 modifier = Modifier
@@ -465,7 +468,7 @@ private fun ReportOverlay(
             Text("AI 报告", color = Color(0xFFB79CE8), fontSize = 11.sp)
             Spacer(Modifier.fillMaxWidth(0.06f))
             if (generating) {
-                Text("生成中…", color = Color(0xFF8A8A8A), fontSize = 8.sp)
+                Text("生成中…", color = INK_LOW, fontSize = 8.sp)
             }
             Spacer(Modifier.weight(1f))
             Text(
@@ -487,7 +490,7 @@ private fun ReportOverlay(
 
                 text.isEmpty() && generating -> Text(
                     text = notice ?: "正在分析…（公共接口无 SLA，高峰可能排队）",
-                    color = if (notice != null) Color(0xFFE8C36A) else Color(0xFF8A8A8A),
+                    color = if (notice != null) Color(0xFFE8C36A) else INK_HIGH,
                     fontSize = 9.sp,
                     lineHeight = 13.sp,
                 )
@@ -511,7 +514,7 @@ private fun ReportOverlay(
         Spacer(Modifier.height(4.dp))
         Text(
             text = "由公共 AI 接口生成 · 样本量小，仅供参考，非医学建议",
-            color = Color(0xFF5E5E5E),
+            color = INK_LOW,
             fontSize = 7.sp,
         )
     }
@@ -581,7 +584,7 @@ private fun PressureCheckInChart(
     // 现在文字与曲线共用同一个 xOf/yOf，位置不再有二义。
     val measurer = rememberTextMeasurer()
     val axisLabelStyle = TextStyle(color = Color(0xFF808A94), fontSize = 7.sp)
-    val timeLabelStyle = TextStyle(color = Color(0xFF6E6E6E), fontSize = 6.sp)
+    val timeLabelStyle = TextStyle(color = INK_LOW, fontSize = 6.sp)
 
     Column(modifier = modifier) {
         Box(modifier = Modifier.fillMaxWidth().weight(1f)) {

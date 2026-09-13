@@ -186,17 +186,17 @@ object HourlyArchive {
 
     private fun toLine(row: HourlyRow): String = listOf(
         row.hourStartMs.toString(),
-        "%.2f".format(row.weatherAvgHpa),
-        "%.2f".format(row.weatherMinHpa),
-        "%.2f".format(row.weatherMaxHpa),
-        "%.2f".format(row.rawAvgHpa),
+        csvNum(row.weatherAvgHpa, 2),
+        csvNum(row.weatherMinHpa, 2),
+        csvNum(row.weatherMaxHpa, 2),
+        csvNum(row.rawAvgHpa, 2),
         row.samples.toString(),
-        row.heartRateAvg?.let { "%.0f".format(it) } ?: "",
-        row.restingHeartRate?.let { "%.0f".format(it) } ?: "",
-        row.wristTempAvg?.let { "%.2f".format(it) } ?: "",
-        row.wristTempMin?.let { "%.2f".format(it) } ?: "",
-        row.wristTempMax?.let { "%.2f".format(it) } ?: "",
-        row.lightAvgLux?.let { "%.0f".format(it) } ?: "",
-        row.lightMinLux?.let { "%.0f".format(it) } ?: "",
+        csvNum(row.heartRateAvg, 0),
+        csvNum(row.restingHeartRate, 0),
+        csvNum(row.wristTempAvg, 2),
+        csvNum(row.wristTempMin, 2),
+        csvNum(row.wristTempMax, 2),
+        csvNum(row.lightAvgLux, 0),
+        csvNum(row.lightMinLux, 0),
     ).joinToString(",")
 }

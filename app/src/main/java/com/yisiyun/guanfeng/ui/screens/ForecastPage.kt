@@ -28,6 +28,9 @@ import androidx.compose.ui.unit.sp
 import com.yisiyun.guanfeng.log.QweatherLogger
 import com.yisiyun.guanfeng.ui.components.PageHeader
 import com.yisiyun.guanfeng.ui.components.WeatherIcon
+import com.yisiyun.guanfeng.ui.theme.INK_MID
+import com.yisiyun.guanfeng.ui.theme.INK_LOW
+import com.yisiyun.guanfeng.ui.theme.INK_HIGH
 
 /**
  * 负一屏 · 天气预报。
@@ -214,7 +217,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
                 label = "首要污染物",
                 value = air.primaryPollutant.ifBlank { "—" },
                 unit = "",
-                valueColor = Color(0xFFB8B8B8),
+                valueColor = INK_HIGH,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -228,7 +231,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
         Spacer(Modifier.height(10.dp))
         Text(
             "天气数据由和风天气提供",
-            color = Color(0xFF5A5A5A),
+            color = INK_LOW,
             fontSize = 7.sp,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
@@ -238,7 +241,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.SnapshotBody(
             // 定位来源要写出来：它决定这份预报的可信范围（高德 Wi-Fi 是 30 米级、IP 推断是城市级）。
             // 但要写**人话**：amap:4 是开发者黑话，使用者看不懂，看不懂就等于没写。
             "定位：" + locationSourceLabel(snapshot.locationSource),
-            color = Color(0xFF5A5A5A),
+            color = INK_LOW,
             fontSize = 7.sp,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
@@ -268,11 +271,13 @@ private fun DayCell(day: QweatherLogger.DayLine) {
     fun one(v: String) = v.toDoubleOrNull()?.let { String.format(java.util.Locale.US, "%.0f", it) } ?: "—"
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, color = if (localDate == today) Color(0xFF6EE7A8) else Color(0xFF9A9A9A), fontSize = 8.sp)
+        Text(label, color = if (localDate == today) Color(0xFF6EE7A8) else INK_MID, fontSize = 8.sp)
         Spacer(Modifier.height(3.dp))
         WeatherIcon(code = day.conditionCode, tint = Color(0xFFB8D8E8), fontSize = 15.sp)
         Spacer(Modifier.height(3.dp))
-        Text("${one(day.minC)}°/${one(day.maxC)}°", color = Color(0xFFD0D0D0), fontSize = 8.sp)
+        // 逐日横条这一行数字的亮度就是"低档"的**锚点**——主人指着它说"这样的亮度为最低档"。
+        // 亮度保持不变，只是给它一个名字，三档见 ui/theme/Ink.kt。
+        Text("${one(day.minC)}°/${one(day.maxC)}°", color = INK_LOW, fontSize = 8.sp)
     }
 }
 
@@ -291,12 +296,14 @@ private fun HourRow(hour: QweatherLogger.HourLine) {
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = Color(0xFF9A9A9A), fontSize = 9.sp, modifier = Modifier.weight(0.9f))
+        Text(label, color = INK_MID, fontSize = 9.sp, modifier = Modifier.weight(0.9f))
         WeatherIcon(code = hour.conditionCode, tint = Color(0xFFB8D8E8), fontSize = 12.sp)
         Spacer(Modifier.width(4.dp))
         Text(
             hour.conditionText.ifBlank { "—" },
-            color = Color(0xFFD0D0D0),
+            // 天气文字是**内容**，不是注释：主人定的口径是"逐小时那行文字用最高档"，
+            // 这一行里温度已是最高的那一档，天气文字取中档——整行读起来才是"最好认的那一块"。
+            color = INK_MID,
             fontSize = 9.sp,
             modifier = Modifier.weight(1.4f),
         )
@@ -330,7 +337,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.EmptyState(
     onButton: () -> Unit,
 ) {
     Spacer(Modifier.height(10.dp))
-    Text(text, color = Color(0xFFB8B8B8), fontSize = 9.sp, lineHeight = 12.sp)
+    Text(text, color = INK_HIGH, fontSize = 9.sp, lineHeight = 12.sp)
     Spacer(Modifier.weight(1f))
     Button(
         onClick = onButton,
@@ -344,7 +351,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.EmptyState(
     Spacer(Modifier.height(6.dp))
     Text(
         "天气数据由和风天气提供",
-        color = Color(0xFF5A5A5A),
+        color = INK_LOW,
         fontSize = 7.sp,
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth(),
@@ -375,7 +382,7 @@ private fun MetricCard(
         // "hPa" 就被逐字挤成竖排三行——Row 里没设 maxLines 就是这个下场。
         Text(
             if (unit.isBlank()) label else "$label · $unit",
-            color = Color(0xFF7A7A7A),
+            color = INK_LOW,
             fontSize = 7.sp,
             maxLines = 1,
         )

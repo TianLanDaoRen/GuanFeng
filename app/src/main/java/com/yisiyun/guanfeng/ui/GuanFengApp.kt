@@ -51,6 +51,7 @@ import com.yisiyun.guanfeng.ui.screens.BodyPage
 import com.yisiyun.guanfeng.ui.screens.CheckInPage
 import com.yisiyun.guanfeng.ui.screens.RecordPage
 import com.yisiyun.guanfeng.ui.screens.WeatherPage
+import com.yisiyun.guanfeng.ui.theme.INK_HIGH
 
 /**
  * 观风主界面：三屏左右滑动（观风 / 体感 / 记录），底部三点为翻页符。
@@ -231,7 +232,7 @@ fun GuanFengApp() {
                     modifier = Modifier
                         .size(if (active) 6.dp else 4.dp)
                         .clip(CircleShape)
-                        .background(if (active) Color(0xFFB4B4B4) else Color(0xFF3A3A3A)),
+                        .background(if (active) INK_HIGH else Color(0xFF3A3A3A)),
                 )
             }
         }

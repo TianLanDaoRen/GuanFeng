@@ -71,14 +71,11 @@ object QweatherLogger {
     private val clockFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
 
     /**
-     * 数值格式化：**固定 Locale.US**。
+     * 数值格式化：**固定 Locale.US**（实现就是 [csvNum]，全应用同一条规矩）。
      * 默认 Locale 在某些区域会把小数点写成逗号，那会直接把 CSV 的列切碎——
      * 这类 bug 在中文环境里测不出来，换台设备就爆。
      */
-    fun num(value: Double?, digits: Int = 2): String {
-        if (value == null || value.isNaN() || value.isInfinite()) return ""
-        return String.format(Locale.US, "%.${digits}f", value)
-    }
+    fun num(value: Double?, digits: Int = 2): String = csvNum(value, digits)
 
     fun num(value: Int?): String = value?.toString() ?: ""
 

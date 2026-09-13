@@ -53,7 +53,7 @@ class CsvSessionLogger(context: Context) {
         runCatching {
             directory.mkdirs()
             if (!file.exists()) file.writeText(HEADER + "\n")
-            rowCount = file.readLines().count { it.isNotBlank() } - 1
+            rowCount = countDataRows(file)
         }
     }
 
@@ -89,10 +89,10 @@ class CsvSessionLogger(context: Context) {
                     }
                 }
             }
-            val removed = rowCount - temp.readLines().count { it.isNotBlank() } + 1
+            val removed = rowCount - countDataRows(temp)
             if (file.delete() && temp.renameTo(file)) {
                 droppedRows += removed.coerceAtLeast(0)
-                rowCount = file.readLines().count { it.isNotBlank() } - 1
+                rowCount = countDataRows(file)
             } else {
                 temp.delete()
             }
@@ -118,24 +118,24 @@ class CsvSessionLogger(context: Context) {
         val line = buildString {
             append(timestampMs).append(',')
             append(clock).append(',')
-            append("%.2f".format(pressureHpa)).append(',')
-            append("%.2f".format(verticalAccel)).append(',')
+            append(csvNum(pressureHpa, 2)).append(',')
+            append(csvNum(verticalAccel, 2)).append(',')
             append(stepsInWindow).append(',')
-            append("%.3f".format(trend?.rateHpaPerHour ?: 0f)).append(',')
-            append("%.3f".format(trend?.deltaHpaPer3h ?: 0f)).append(',')
+            append(csvNum(trend?.rateHpaPerHour ?: 0f, 3)).append(',')
+            append(csvNum(trend?.deltaHpaPer3h ?: 0f, 3)).append(',')
             append(trend?.grade?.label ?: "等样本").append(',')
             append(trend?.weatherSamples ?: 0).append(',')
             append(trend?.elevationEvents ?: 0).append(',')
-            append("%.2f".format(trend?.elevationMeters ?: 0f)).append(',')
-            append("%.3f".format(trend?.fitRSquared ?: 0f)).append(',')
-            append("%.2f".format(trend?.windowMinutes ?: 0f)).append(',')
-            append("%.0f".format((trend?.coverageFraction ?: 0f) * 100f)).append(',')
+            append(csvNum(trend?.elevationMeters ?: 0f, 2)).append(',')
+            append(csvNum(trend?.fitRSquared ?: 0f, 3)).append(',')
+            append(csvNum(trend?.windowMinutes ?: 0f, 2)).append(',')
+            append(csvNum((trend?.coverageFraction ?: 0f) * 100f, 0)).append(',')
             append(trend?.confidence?.label ?: "数据不足").append(',')
-            append(restingHeartRateBpm?.let { "%.0f".format(it) } ?: "").append(',')
-            append(lightDelta10Min?.let { "%.0f".format(it) } ?: "").append(',')
-            append(weatherPressureHpa?.let { "%.2f".format(it) } ?: "").append(',')
-            append(lightLux?.let { "%.0f".format(it) } ?: "").append(',')
-            append(verticalDisplacementM?.let { "%.2f".format(it) } ?: "")
+            append(csvNum(restingHeartRateBpm, 0)).append(',')
+            append(csvNum(lightDelta10Min, 0)).append(',')
+            append(csvNum(weatherPressureHpa, 2)).append(',')
+            append(csvNum(lightLux, 0)).append(',')
+            append(csvNum(verticalDisplacementM, 2))
         }
         file.appendText(line + "\n")
         rowCount++
@@ -162,3 +162,34 @@ class CsvSessionLogger(context: Context) {
                 "vertical_displacement_m"
     }
 }
+
+/**
+ * 数数据行（不含表头）。顶层函数是为了能被单测直接调用——行数算错会让
+ * "紧凑化丢掉了多少行"跟着错。
+ *
+ * **不要用 `readLines()`**：文件上限 30MB，那会把它整份拉成二十多万个 `String`——
+ * 在手表上是几十 MB 的瞬时分配，而且正好落在应用启动（init）与每次紧凑化
+ * （那里还要连数两遍）这两条路径上。数换行符只占一个 64KB 缓冲，结果一样。
+ *
+ * 每行都以 `\n` 结尾（见 [CsvSessionLogger.append]），所以行数 = 换行数，减去表头那一行。
+ * 万一上次写到一半被杀（末行没有换行），末行补算一行。
+ */
+internal fun countDataRows(target: File): Int = runCatching {
+    if (!target.isFile) return 0
+    var newlines = 0L
+    var lastByte = -1
+    target.inputStream().use { input ->
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+            val read = input.read(buffer)
+            if (read <= 0) break
+            for (i in 0 until read) {
+                if (buffer[i] == '\n'.code.toByte()) newlines++
+            }
+            lastByte = buffer[read - 1].toInt()
+        }
+    }
+    var lines = newlines
+    if (lastByte != -1 && lastByte != '\n'.code) lines++
+    (lines - 1).coerceAtLeast(0).toInt()
+}.getOrDefault(0)

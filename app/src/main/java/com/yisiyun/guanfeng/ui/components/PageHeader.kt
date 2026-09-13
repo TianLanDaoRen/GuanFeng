@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.yisiyun.guanfeng.ui.theme.INK_MID
 
 /**
  * 每页顶部的「主标题 + 副标题」。
@@ -36,7 +37,7 @@ fun PageHeader(
     title: String,
     titleColor: Color,
     subtitle: String,
-    subtitleColor: Color = SUBTITLE_GRAY,
+    subtitleColor: Color = SUBTITLE_INK,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -56,5 +57,9 @@ fun PageHeader(
     }
 }
 
-/** 副标题的默认灰：所有页面统一用它，除非某一页的副标题本身要表达状态（如"写入异常"）。 */
-val SUBTITLE_GRAY = Color(0xFF6E6E6E)
+/** 副标题的默认色：**中档**（白字三档见 `ui/theme/Ink.kt`）。
+ *
+ * 它以前是 `#6E6E6E`——在手表上属于"看得见但读不清"，而副标题是要读的信息
+ * （"取自 20:39:33"、"已采 1253 条"），不是装饰。
+ */
+val SUBTITLE_INK = INK_MID

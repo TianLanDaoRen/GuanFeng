@@ -21,6 +21,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.yisiyun.guanfeng.ui.theme.INK_MID
+import com.yisiyun.guanfeng.ui.theme.INK_LOW
+import com.yisiyun.guanfeng.ui.theme.INK_HIGH
 
 /**
  * 天气采集的**三步设置流程**：说明 → 定位 → （失败时的）出路。
@@ -97,14 +100,14 @@ fun ForecastSetupOverlay(
                 Spacer(Modifier.height(5.dp))
                 Text(
                     "打开即可，连不连上热点都行——扫描本身就够用。",
-                    color = Color(0xFF9A9A9A),
+                    color = INK_LOW,
                     fontSize = 9.sp,
                     lineHeight = 12.sp,
                 )
                 Spacer(Modifier.weight(1f))
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     FullWidthButton("打开 Wi-Fi 设置", Color(0xFF2A6C86), Color(0xFFD8F2FA), onOpenWifi)
-                    FullWidthButton("退出应用", Color(0xFF242424), Color(0xFF9A9A9A), onExitApp)
+                    FullWidthButton("退出应用", Color(0xFF242424), INK_MID, onExitApp)
                 }
             }
 
@@ -123,12 +126,12 @@ fun ForecastSetupOverlay(
                 Text(
                     "拿到坐标才动。之后每轮采集都会静默更新一次定位，" +
                         "更新不上就沿用上次的，不会因为定位失败而停止采集。",
-                    color = Color(0xFF8A8A8A),
+                    color = INK_LOW,
                     fontSize = 8.sp,
                     lineHeight = 11.sp,
                 )
                 Spacer(Modifier.weight(1f))
-                FullWidthButton("取消", Color(0xFF242424), Color(0xFF9A9A9A), onCancelLocating)
+                FullWidthButton("取消", Color(0xFF242424), INK_MID, onCancelLocating)
             }
 
             is WeatherSetupStep.NetworkFound -> {
@@ -146,14 +149,14 @@ fun ForecastSetupOverlay(
                     "这是网络出口所在的区域，常常是运营商在省内的节点，" +
                         "不一定正好是你所在的城市。天气本身是城市级的，一般够用；" +
                         "要更准就到户外点「再试定位」拿卫星定位。来源会如实记进 CSV。",
-                    color = Color(0xFF8A8A8A),
+                    color = INK_LOW,
                     fontSize = 8.sp,
                     lineHeight = 11.sp,
                 )
                 Spacer(Modifier.weight(1f))
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     FullWidthButton("就用这个", Color(0xFF2A6C86), Color(0xFFD8F2FA), onUseRemembered)
-                    FullWidthButton("再试定位", Color(0xFF242424), Color(0xFF9A9A9A), onRetry)
+                    FullWidthButton("再试定位", Color(0xFF242424), INK_MID, onRetry)
                 }
             }
 
@@ -174,13 +177,13 @@ fun ForecastSetupOverlay(
                         FullWidthButton("用上次记录的坐标", Color(0xFF2A6C86), Color(0xFFD8F2FA), onUseRemembered)
                     }
                     FullWidthButton("再试一次", Color(0xFF2A6C86), Color(0xFFD8F2FA), onRetry)
-                    FullWidthButton("暂不采集", Color(0xFF242424), Color(0xFF9A9A9A), onCancelLocating)
+                    FullWidthButton("暂不采集", Color(0xFF242424), INK_MID, onCancelLocating)
                 }
             }
         }
 
         Spacer(Modifier.height(6.dp))
-        Text("天气数据由和风天气提供", color = Color(0xFF5A5A5A), fontSize = 7.sp)
+        Text("天气数据由和风天气提供", color = INK_LOW, fontSize = 7.sp)
     }
 }
 
@@ -194,15 +197,15 @@ private fun ColumnScope.ConsentBody(onAllow: () -> Unit, onDecline: () -> Unit) 
     )
     Spacer(Modifier.height(7.dp))
     Text("会上传", color = Color(0xFF6EE7A8), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-    Text("你的坐标（约 1 公里精度）", color = Color(0xFFB8B8B8), fontSize = 9.sp, lineHeight = 12.sp)
+    Text("你的坐标（约 1 公里精度）", color = INK_HIGH, fontSize = 9.sp, lineHeight = 12.sp)
     Spacer(Modifier.height(5.dp))
     Text("不会上传", color = Color(0xFFF2C14E), fontSize = 9.sp, fontWeight = FontWeight.Bold)
     Text(
         "心率、腕温、气压读数、体感打卡、备注原文",
-        color = Color(0xFFB8B8B8), fontSize = 9.sp, lineHeight = 12.sp,
+        color = INK_HIGH, fontSize = 9.sp, lineHeight = 12.sp,
     )
     Spacer(Modifier.height(6.dp))
-    Text("点开启后需要先取一次定位。只问这一次。", color = Color(0xFF7A7A7A), fontSize = 8.sp)
+    Text("点开启后需要先取一次定位。只问这一次。", color = INK_LOW, fontSize = 8.sp)
     Spacer(Modifier.weight(1f))
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -214,7 +217,7 @@ private fun ColumnScope.ConsentBody(onAllow: () -> Unit, onDecline: () -> Unit) 
             modifier = Modifier.weight(1f),
             shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFF242424), contentColor = Color(0xFF9A9A9A),
+                containerColor = Color(0xFF242424), contentColor = INK_MID,
             ),
         ) { Text("不用", fontSize = 11.sp) }
         Button(
