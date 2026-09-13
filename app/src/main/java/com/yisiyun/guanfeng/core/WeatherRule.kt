@@ -77,10 +77,16 @@ object WeatherRule {
                 likelihood = if (high) RainLikelihood.HIGH else RainLikelihood.MEDIUM,
                 shortReason = if (high) "已降幅较大" else "可能下雨",
                 advice = if (high) "带伞" else "备把伞",
-                rationale = "本轮过程已累计下降 %.1f hPa，尚未出现足够回升" +
-                    "（自最低点回升 %.1f hPa 才解除）。下雨是有始有终的过程，" +
-                    "在解除之前一直维持提醒，不被此刻的瞬时平稳带偏"
-                        .format(drop, CLEAR_RISE_HPA)
+                // **整段拼接完再 format**。
+                // 原来写成 "a" + "b" + "c".format(...) —— Kotlin 里 `.format` 只绑到
+                // 紧邻的那个字面量，前面的 `+` 拼接没被格式化，于是真机上原样显示
+                // "累计下降 %.1f hPa"。这种错**编译期不会报、单测也不一定覆盖**，
+                // 只有真机看一眼才发现。凡是多段拼出来的 format 模板，一律加括号。
+                rationale = (
+                    "本轮过程已累计下降 %.1f hPa，尚未出现足够回升" +
+                        "（自最低点回升 %.1f hPa 才解除）。下雨是有始有终的过程，" +
+                        "在解除之前一直维持提醒，不被此刻的瞬时平稳带偏"
+                    ).format(drop, CLEAR_RISE_HPA)
             )
         }
         // ① 数据不够：这两条无论何时都不给结论
