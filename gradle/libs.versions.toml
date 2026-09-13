@@ -6,7 +6,7 @@ lifecycleRuntimeKtx = "2.11.0"
 activityCompose = "1.13.0"
 kotlin = "2.2.10"
 composeBom = "2026.09.00"
-amapLocation = "6.4.9"
+amapLocation = "11.2.100"
 
 [libraries]
 # 高德定位 SDK：本机融合 Wi-Fi + 基站 + GPS，是室内唯一能到街道级的办法
