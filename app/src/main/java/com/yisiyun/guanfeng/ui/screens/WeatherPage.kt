@@ -126,7 +126,12 @@ fun WeatherPage(state: RecorderState) {
             contentAlignment = Alignment.Center,
         ) {
             TrendGauge(
-                rateHpaPerHour = trend?.rateHpaPerHour ?: 0f,
+                // 指针用**实测平均速率**（不是被门限压平过的 rateHpaPerHour）：
+                // 判定可以保守，仪表必须显示真实读数。乘 3 小时正好是下面那行 ΔP(3h)。
+                rateHpaPerHour = TrendLabel.averageRateHpaPerHour(
+                    observedDeltaHpa = trend?.observedDeltaHpa ?: 0f,
+                    windowMinutes = trend?.windowMinutes ?: 0f,
+                ),
                 grade = trend?.grade ?: TrendGrade.INSUFFICIENT,
                 likelihood = likelihood,
                 hasTrend = hasConclusion,
@@ -183,8 +188,8 @@ fun WeatherPage(state: RecorderState) {
                 } else {
                     // 被门限压平时不许写 +0.0（会被读成"气压不变"）——见 TrendLabel.pageDeltaLine
                     TrendLabel.pageDeltaLine(
-                        deltaHpaPer3h = trend?.deltaHpaPer3h ?: 0f,
-                        belowThreshold = trend?.belowThreshold == true,
+                        observedDeltaHpa = trend?.observedDeltaHpa ?: 0f,
+                        windowMinutes = trend?.windowMinutes ?: 0f,
                     )
                 },
                 color = INK_LOW,

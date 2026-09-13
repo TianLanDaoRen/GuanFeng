@@ -25,14 +25,33 @@ object TrendLabel {
     const val FULL_WINDOW_MINUTES = 170f
 
     /**
-     * 观风页那行的说法。
+     * 观风页那行：**显示实测净变**，不显示被门限压平过的外推值。
      *
-     * 被门限压平时**不能写"+0.0"** —— 那会被读成"气压不变"，而实际是"变了但不足以支撑方向"。
-     * 这种情况直接说"变化不足 0.5 hPa"，与仪表盘上的"平稳"自洽。
+     * 为什么改（2026-09-13 主人指出）：引擎有一条绝对量门限（窗口净变 <0.5 hPa 不报方向，
+     * 速率强制为 0），于是页面写"外推 +0.0 hPa" —— 可那一窗口实测是 −0.45 hPa，
+     * 关联页曲线也在往下。**判定保守是对的，但仪表必须显示真实读数**，
+     * 否则用户看到的是"气压不变"，而事实是"在降，只是幅度不足以支撑预报结论"。
+     *
+     * 满窗才叫 `ΔP(3h)`；窗口不满时老实写"近 N 分钟净变"（不拿短窗外推充数）。
      */
-    fun pageDeltaLine(deltaHpaPer3h: Float, belowThreshold: Boolean, thresholdHpa: Float = 0.5f): String =
-        if (belowThreshold) "ΔP(3h) 变化不足 ${thresholdHpa} hPa"
-        else "ΔP(3h) 外推 %+.1f hPa".format(deltaHpaPer3h)
+    fun pageDeltaLine(observedDeltaHpa: Float, windowMinutes: Float): String =
+        if (windowMinutes >= FULL_WINDOW_MINUTES) {
+            "ΔP(3h) 实测 %+.1f hPa".format(observedDeltaHpa)
+        } else {
+            "近 ${windowMinutes.toInt()} 分钟净变 %+.1f hPa".format(observedDeltaHpa)
+        }
+
+    /**
+     * 圆环指针用的速率：**窗口内的平均速率** = 实测净变 ÷ 窗口小时数。
+     *
+     * 不用最小二乘斜率，也不用被门限压平过的 `rateHpaPerHour`：
+     *   · 平均速率是**实测值**，不会像斜率那样被噪声放大（真机实测：静置 6 分钟、跨度仅 0.04 hPa，
+     *     回归斜率却给出 −0.56 hPa/h —— 那正是门限存在的理由）；
+     *   · 它乘 3 小时正好等于页面显示的 ΔP(3h)，两者自洽。
+     * 判据（等级、提醒）仍然走门限，仪表与判定各司其职。
+     */
+    fun averageRateHpaPerHour(observedDeltaHpa: Float, windowMinutes: Float): Float =
+        if (windowMinutes <= 1f) 0f else observedDeltaHpa / (windowMinutes / 60f)
 
     /** 窗口内的净变标签：满窗叫"3 小时净变"，否则老实说是"近 N 分钟净变"。 */
     fun deltaLabel(windowMinutes: Float): String =
