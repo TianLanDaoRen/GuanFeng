@@ -156,7 +156,7 @@ fun RecordPage(state: RecorderState) {
                 text = if (noticeFeedback.isNotEmpty()) {
                     noticeFeedback
                 } else {
-                    "按下后 5 秒才震。**趁这 5 秒退出应用或熄屏**——震了，说明服务能调起震动；没震，说明这条链路不通"
+                    "按下后 5 秒才震。趁这 5 秒退出应用或熄屏——震了说明服务能调起震动，没震说明这条链路不通"
                 },
                 color = Color(0xFF6E6E6E),
                 fontSize = 7.sp,
