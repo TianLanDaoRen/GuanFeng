@@ -206,6 +206,15 @@ object ElevationClassifier {
     const val DISPLACEMENT_EVIDENCE_M = 1.5f
 
     /**
+     * **速率过硬阈值**：与"同向连续步数 ≥6"一起构成豁免条件。
+     *
+     * 依据：真实天气 ≤0.056 hPa/分（文献）；电梯实测 5~12 hPa/分。
+     * 单独看速率会被 ±2 hPa/100 秒的方波钻空子（它的速率也有 2.4），
+     * 所以必须叠加"持续单向"这个形状判据。
+     */
+    const val OVERRIDE_EVIDENCE_HPA_PER_MIN = 2.0f
+
+    /**
      * 瞬时证据：这一采样点上是否看得出**真正的垂直位移**。
      *
      * 曾经这里用的是竖直加速度峰值，那是错的：真机上挥一下手就能到 10 m/s² 以上，
@@ -282,6 +291,10 @@ class PressureTrendEngine(
         var baselineIndex = 0
         var lastElevationStepHpa: Float? = null
         var pathLength = 0f
+        // 同向连续步数：电梯是 10~12 步持续单向，方波/挥手只有 1 步。
+        // 它不依赖任何窗口长度，所以不会出现"窗口比现象长或短"的失效。
+        var runLength = 0
+        var runSign = 0
         val corrected = ArrayList<Pair<Long, Float>>(windowed.size)
         corrected += windowed[0].timestampMs to windowed[0].pressureHpa
 
@@ -317,7 +330,26 @@ class PressureTrendEngine(
             // 同时要求本步幅度超过噪声底——真机实测平地段噪声单步 ≤0.02 hPa，
             // 若不设这道门限，平地段会被计入大量 0.01 hPa 级的「事件」，
             // 让 elevation_events 从真实 4 段虚高到 145 次。
-            if (fastChange && inVerticalTransit && abs(stepDelta) >= minStepDeltaHpa) {
+            // 【同向连续步，2026-09-14 黑盒回测驱动】
+            // 起因：两趟电梯差异巨大（下行只归属 21%、上行 84%），同段代码方向无关，
+            // 差别只在"位移证据（|积分位移|≥1.5 米）何时成立"——该积分在电梯里只积出
+            // 1.6 米（τ=3 秒、漂移主导），**追不上下行电梯的起点**。
+            // 前两次尝试都被单测挡回：只按速率会被 ±2 hPa/100 秒方波钻空子；
+            // 加"60 秒单向性"又会被方波的平台骗过（窗口整段落在平台内）。
+            // 真正能分开的是**同向连续步数**：电梯 10~12 步持续单向，方波平台只有 1 步。
+            // 要求每步幅度 ≥ 噪声底，所以平台里的小抖动攒不出 run。
+            if (abs(stepDelta) >= 0.02f) {
+                val sign = if (stepDelta > 0f) 1 else -1
+                runLength = if (sign == runSign) runLength + 1 else 1
+                runSign = sign
+            } else {
+                runLength = 0
+                runSign = 0
+            }
+            val rateOverride = runLength >= 6 &&
+                abs(rate) > ElevationClassifier.OVERRIDE_EVIDENCE_HPA_PER_MIN
+
+            if (fastChange && (inVerticalTransit || rateOverride) && abs(stepDelta) >= minStepDeltaHpa) {
                 elevationOffset += stepDelta
                 elevationEvents++
                 // 只把「最后一步」报出去：调用方据此跨窗口累积偏移，
