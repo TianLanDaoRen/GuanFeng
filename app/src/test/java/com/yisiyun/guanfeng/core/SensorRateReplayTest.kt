@@ -303,8 +303,22 @@ class SensorRateReplayTest {
         // 注意单位：fast 区间是**毫秒**（epoch），事件是**纳秒**（boot）——必须先换算再比。
         // 第一版直接拿 `e.tsNs + off`（纳秒）去查毫秒区间，结果一条都没命中，
         // 于是一整个电梯的 8.88 hPa 被当成天气，跑出了"偏移差 8.88 hPa"的假失败。
-        for (th in listOf(0.3f, 0.15f, 0.10f)) {
-            val fast = fastIntervals(window, off, th)
+        // 基线长度从 20 秒拉到 5 分钟：噪声按 √N 平均掉，
+        // 只有这样才能分辨"文献下限"那一档（3 hPa/3h = 0.05 hPa/分）。
+        // 四档对照：①短基线抓电梯脉冲 ②长基线抓慢漂移 ③④**双尺度取或**（两者都要）
+        // 结论预期：短基线必须留（60 秒的电梯在 5 分钟基线上会被稀释到看不见），
+        //          长基线负责补"慢速缆车"那个缺口，两者取或才同时成立。
+        val dualShort = fastIntervals(window, off, 0.30f, 20_000L)
+        val dualLong = fastIntervals(window, off, 0.05f, 300_000L)
+        val dualLong10 = fastIntervals(window, off, 0.10f, 300_000L)
+        val dual = dualShort + dualLong
+        val dual10 = dualShort + dualLong10
+        for ((label, fast) in listOf(
+            "基线 20 秒 / 阈值 0.30（现行）" to dualShort,
+            "基线 300 秒 / 阈值 0.05（只长）" to dualLong,
+            "**双尺度 或**（20s/0.30 ∨ 300s/0.05）" to dual,
+            "**双尺度 或**（20s/0.30 ∨ 300s/0.10）" to dual10,
+        )) {
             val evs = window.filter { e ->
                 (e.type != 9 && e.type != 10) || fast.any { (e.tsNs + off) / 1_000_000L in it }
             }
@@ -315,7 +329,7 @@ class SensorRateReplayTest {
             // 第一版我写成"保留"，于是"0.15 时 218 条"被读成"只保留 2%"——
             // 真相恰恰相反：低阈值让触发器几乎一直开着，绝大多数事件**都被保留**，省电直接归零。
             println(
-                "⑤ 空闲停运动流（阈值 ${"%.2f".format(th)} hPa/分）：" +
+                "⑤ 空闲停运动流（$label）：" +
                     "**删掉**运动事件 $keptMotion 条（占 ${keptMotion * 100 / totalMotion}%）"
             )
             report(t5, base)
@@ -341,19 +355,19 @@ class SensorRateReplayTest {
      * 换成登山缆车或滑雪滑降（5~20 分钟持续变压）就会中途掉回低速档、把运动证据丢掉。
      * 续期之后，**不需要预知运动要持续多久**。
      */
-    private fun fastIntervals(window: List<RawEvent>, off: Long, thresholdHpaPerMin: Float = 0.3f): List<LongRange> {
+    private fun fastIntervals(window: List<RawEvent>, off: Long, thresholdHpaPerMin: Float = 0.3f, baselineMs: Long = 20_000L): List<LongRange> {
         val press = window.filter { it.type == 6 }.sortedBy { it.tsNs }
         if (press.isEmpty()) return emptyList()
         val out = ArrayList<LongRange>()
         var startMs = 0L
         var endMs = 0L
         for (i in press.indices) {
-            val past = press.subList(0, i).lastOrNull { press[i].tsNs - it.tsNs >= 20_000_000_000L }
+            val past = press.subList(0, i).lastOrNull { press[i].tsNs - it.tsNs >= baselineMs * 1_000_000L }
                 ?: continue
             val spanMs = (press[i].tsNs - past.tsNs) / 1_000_000L
             val rate = (press[i].v[0] - past.v[0]) / (spanMs / 60_000f)
             val now = (press[i].tsNs + off) / 1_000_000L
-            if (abs(rate) > thresholdHpaPerMin && spanMs >= 20_000L) {
+            if (abs(rate) > thresholdHpaPerMin && spanMs >= baselineMs) {
                 if (startMs == 0L) startMs = now
                 endMs = now + 60_000L
             } else if (startMs != 0L && now > endMs) {
