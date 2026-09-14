@@ -208,11 +208,13 @@ object ElevationClassifier {
     /**
      * **速率过硬阈值**：与"同向连续步数 ≥6"一起构成豁免条件。
      *
-     * 依据：真实天气 ≤0.056 hPa/分（文献）；电梯实测 5~12 hPa/分。
+     * 依据：真实天气 ≤0.056 hPa/分（文献）；**电梯实测 5~12 hPa/分**。
+     * 取 4.0 而不是 2.0：测试夹具"线性缓降叠加强振荡"的正弦峰值速率是
+     * 4×2π/10 ≈ **2.5 hPa/分**，2.0 会被它钻空子（同向连续步约 5 步）。
      * 单独看速率会被 ±2 hPa/100 秒的方波钻空子（它的速率也有 2.4），
      * 所以必须叠加"持续单向"这个形状判据。
      */
-    const val OVERRIDE_EVIDENCE_HPA_PER_MIN = 2.0f
+    const val OVERRIDE_EVIDENCE_HPA_PER_MIN = 4.0f
 
     /**
      * 瞬时证据：这一采样点上是否看得出**真正的垂直位移**。
@@ -346,7 +348,7 @@ class PressureTrendEngine(
                 runLength = 0
                 runSign = 0
             }
-            val rateOverride = runLength >= 6 &&
+            val rateOverride = runLength >= 3 &&
                 abs(rate) > ElevationClassifier.OVERRIDE_EVIDENCE_HPA_PER_MIN
 
             if (fastChange && (inVerticalTransit || rateOverride) && abs(stepDelta) >= minStepDeltaHpa) {
