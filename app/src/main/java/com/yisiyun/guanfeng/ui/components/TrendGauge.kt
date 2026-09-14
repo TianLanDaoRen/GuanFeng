@@ -134,7 +134,12 @@ fun TrendGauge(
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             // 没有趋势时不要显示一个孤零零的短横（视觉上像坏了），
             // 而是给一个明确的状态词，字号也相应收小
-            if (hasTrend) {
+                        Text(
+                text = "风雨倾向",
+                color = INK_MID,
+                fontSize = 9.sp,
+            )
+if (hasTrend) {
                 Text(
                     text = likelihood.label,
                     color = likelihoodColor(likelihood),
@@ -147,11 +152,6 @@ fun TrendGauge(
                     fontSize = 20.sp,
                 )
             }
-            Text(
-                text = "风雨倾向",
-                color = INK_MID,
-                fontSize = 9.sp,
-            )
 
         }
 
