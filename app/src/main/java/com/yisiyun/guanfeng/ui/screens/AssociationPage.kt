@@ -284,7 +284,7 @@ fun AssociationPage(state: RecorderState) {
                         checkIns = checkIns,
                         nowMs = System.currentTimeMillis(),
                         // 88 → 70dp：2026-09-12 统计拆成两组后多了一行，
-                        // 而这一页可用高度固定 222dp。实测 88dp 时"气压大变化日"那行被裁掉半行，
+                        // 而这一页可用高度固定 222dp。实测 88dp 时"气压剧烈变化日"那行被裁掉半行，
                         // 所以砍的是图表——它在这里是背景，统计才是结论。
                         modifier = Modifier.fillMaxWidth().height(70.dp),
                     )
@@ -306,7 +306,7 @@ fun AssociationPage(state: RecorderState) {
                         lineHeight = 10.sp,
                     )
                     Text(
-                        text = "气压大变化日 ${current.bigSwingDays} 天",
+                        text = "气压剧烈变化日 ${current.bigSwingDays} 天",
                         color = Color(0xFFD0D0D0),
                         fontSize = 8.sp,
                         lineHeight = 10.sp,

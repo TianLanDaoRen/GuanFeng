@@ -154,7 +154,11 @@ object AiDigest {
         builder.append('{')
         builder.append("\"days_with_data\":").append(summary.daysWithData).append(',')
         builder.append("\"big_swing_days\":").append(summary.bigSwingDays).append(',')
-        builder.append("\"big_swing_threshold_hpa\":").append(AssociationAnalyzer.BIG_SWING_HPA).append(',')
+        // 判据换了（2026-09-14）：不再是"整日极差"，而是**3 小时变压**。
+        // 名字与窗口都发给 AI，否则它会把这个 2.0 当成"一天的极差"来解读。
+        builder.append("\"big_change_threshold_hpa\":").append(AssociationAnalyzer.BIG_CHANGE_HPA).append(',')
+        builder.append("\"big_change_window_hours\":")
+            .append(AssociationAnalyzer.BIG_CHANGE_WINDOW_HOURS).append(',')
         builder.append("\"big_swing_dates\":").append(stringArray(summary.bigSwingDayLabels)).append(',')
         // 【名字必须说实话】summary.checkInCount 是**不适打卡**的次数，不是打卡总数。
         // 2026-09-13 主人一眼看出问题：JSON 里写 check_in_count: 1，

@@ -30,7 +30,12 @@ class AssociationAnalyzerTest {
         val dayStart = 20_454L * day - offset
 
         val summary = AssociationAnalyzer.analyze(
-            hourly = listOf(bucket(dayStart + hour, 1000f, 995f, 1000f)),
+            // 判据改成"3 小时变压 ≥ 2"后，**至少要两个已观测小时**才谈得上变压：
+            // 单个小时桶只能给出"小时内的极差"，那是旧判据的口径。
+            hourly = listOf(
+                bucket(dayStart + hour, 1000f, 1000f, 1000f),
+                bucket(dayStart + 2 * hour, 996f, 996f, 996f), // 1 小时内跌 4 hPa ✓
+            ),
             checkIns = emptyList(),
             periodDays = 7,
             zoneOffsetMs = offset,
@@ -103,7 +108,11 @@ class AssociationAnalyzerTest {
     fun `舒适打卡是对照组_不得混进不适的比例`() {
         val dayStart = 20_454L * day - offset
         // 这一天是大变化日（落差 4 hPa）
-        val swingDay = listOf(bucket(dayStart, 1000f, 998f, 1002f))
+        // 两个已观测小时、2 hPa 变压（恰好等于门限 BIG_CHANGE_HPA）
+        val swingDay = listOf(
+            bucket(dayStart, 1000f, 1000f, 1000f),
+            bucket(dayStart + hour, 998f, 998f, 998f),
+        )
         // 另一天不是（落差 0.5 hPa）
         val calmDay = listOf(bucket(dayStart + day, 1000f, 1000f, 1000.5f))
         val hourly = swingDay + calmDay

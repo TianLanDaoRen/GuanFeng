@@ -71,7 +71,7 @@ const val CATEGORY_COMFORT = "comfort"
 data class AssociationSummary(
     val periodDays: Int,
     val daysWithData: Int,
-    /** 日气压落差 ≥ [BIG_SWING_HPA] 的天数。 */
+    /** 「气压剧烈变化日」的天数：当天出现过 ≥ [BIG_CHANGE_HPA] 的 3 小时变压。 */
     val bigSwingDays: Int,
     val checkInCount: Int,
     /** 落在「大变化日」上的打卡数。 */
@@ -101,8 +101,30 @@ data class AssociationSummary(
 
 object AssociationAnalyzer {
 
-    /** 一天之内气压落差达到这个值，就算「气压大变化日」。取 3 hPa：约等于一次明显锋面过境。 */
-    const val BIG_SWING_HPA = 3.0f
+    /**
+     * 「气压剧烈变化日」的判据：**这一天之内出现过 ≥2 hPa 的 3 小时变压**。
+     *
+     * ## 为什么从"整日极差 ≥3 hPa"改成这个（2026-09-14 主人指出）
+     *
+     * 旧判据是"这一天所有小时里 max−min ≥ 3"，有两个致命毛病：
+     *
+     * 1. **0 点一刀切**：一次 3.93 hPa 的摆动横跨 09-12 与 09-13 两天，
+     *    按日历日切完，09-12 分到 3.49（算）、09-13 只分到 2.49（不算）——
+     *    **同一次摆动两天命运不同**。主人原话："过了 24 点，前面的就不看了是吧？"
+     * 2. **名不副实**：实测 09-11~09-14 四天，最大 3 小时变压**从未超过 1.52 hPa**，
+     *    而"整日极差 3.49"是十几个小时**慢慢累积**出来的。旧判据实际测的是
+     *    "这一天气压慢悠悠走了个大来回"，**不是"变化剧烈"**。
+     *
+     * 新判据用气象标准（3 小时变压），并与观风自己的报警门限取同一个量级（2.0 = 中度）。
+     * 滚动窗口天然跨天鲁棒；归属规则：窗口**结束**在哪天就算哪天。
+     *
+     * 按新判据这四天**一天都不算** —— 这才是诚实的结论：那几天只是正常的云层与风的波动
+     * （主人原话）。
+     */
+    const val BIG_CHANGE_HPA = 2.0f
+
+    /** 3 小时变压的窗口（气象惯例）。 */
+    const val BIG_CHANGE_WINDOW_HOURS = 3
 
     /*
      * ## 关于"夜里没数据"——这是**已裁决的设计**，不要再加"日可评估"门槛
@@ -132,6 +154,26 @@ object AssociationAnalyzer {
      * @param zoneOffsetMs 本地时区偏移（例如东八区 = 8h）。日界按本地时间切，
      *   否则「今天」会在凌晨 8 点换日——这是容易被忽略但很影响观感的细节。
      */
+    /**
+     * 这一天里是否出现过 ≥[BIG_CHANGE_HPA] 的 [BIG_CHANGE_WINDOW_HOURS] 小时变压。
+     *
+     * 用**小时均值**而不是小时极值：极值会被单点毛刺带偏，均值才是气象上"变压"的口径。
+     * 比较的是**已观测到的相邻小时**（夜里进睡眠模式会缺几个小时）——
+     * 所以"3 小时"是"最多 3 个已观测小时"，跨度可能略长于 3 小时。这一点如实记在这里，
+     * 与上面"夜里没数据"那段裁决同一个理由：范围本就划在白天。
+     */
+    internal fun dayHasBigChange(buckets: List<HourlyBucket>): Boolean {
+        val sorted = buckets.sortedBy { it.hourStartMs }
+        for (i in sorted.indices) {
+            for (j in maxOf(0, i - BIG_CHANGE_WINDOW_HOURS) until i) {
+                if (kotlin.math.abs(sorted[i].avgHpa - sorted[j].avgHpa) >= BIG_CHANGE_HPA) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
     fun analyze(
         hourly: List<HourlyBucket>,
         checkIns: List<CheckInRecord>,
@@ -141,11 +183,7 @@ object AssociationAnalyzer {
         val sorted = hourly.sortedBy { it.hourStartMs }
         val byDay = sorted.groupBy { dayStartOf(it.hourStartMs, zoneOffsetMs) }
         val bigSwingDayStarts = byDay.entries
-            .filter { (_, buckets) ->
-                val max = buckets.maxOf { it.maxHpa }
-                val min = buckets.minOf { it.minHpa }
-                max - min >= BIG_SWING_HPA
-            }
+            .filter { (_, buckets) -> dayHasBigChange(buckets) }
             .map { it.key }
             .sorted()
         val bigSwingSet = bigSwingDayStarts.toHashSet()
