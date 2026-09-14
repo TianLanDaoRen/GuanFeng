@@ -40,9 +40,10 @@ class SampleAggregator {
         if (value > accelPeak) accelPeak = value
     }
 
-    fun addStep() {
-        steps++
-    }
+    fun addStep() { steps++ }
+
+    /** 一次补记 n 步：STEP_COUNTER 做差时一批可能累计多步。 */
+    fun addSteps(n: Int) { if (n > 0) steps += n }
 
     /** 取走聚合结果并清零。这段时间内一个气压读数都没收到时返回 null——不造样本。 */
     fun flush(timestampMs: Long): PressureSample? {

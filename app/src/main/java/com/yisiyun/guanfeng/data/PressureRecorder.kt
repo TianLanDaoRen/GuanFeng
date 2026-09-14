@@ -336,6 +336,9 @@ object PressureRecorder {
     private var lastPersistMs = 0L
 
     /** 竖直积分的中间量（只在传感器回调里更新）。 */
+    /** STEP_COUNTER 上一次的累计值；<0 表示尚未建立基准。 */
+    private var lastStepCounter = -1f
+
     private var verticalVelocity = 0f
     private var verticalDisplacement = 0f
     private var lastAccelNs = 0L
@@ -638,7 +641,11 @@ object PressureRecorder {
             // 【空闲档不注册运动流】它们被硬件钳在 5Hz，降 ODR 无效，只能整个注销；
             // 触发时由 switchRate 注册回来。计步器必须常驻：它是"电梯/爬楼 vs 平地走路"
             // 的判别证据，且是事件型、几乎不耗电。
-            Sensor.TYPE_STEP_DETECTOR to SensorRatePlan.HIGH_US,
+            // 【计步源更换，2026-09-14 实测驱动】原用 STEP_DETECTOR（一步一事件），
+            // 实测一小时健走只收到 223 步 vs 运动记录真值 6327（**只记到 3.5%**），
+            // 且与档位无关（高中低档都是 154 步）。改用 STEP_COUNTER（累计步数）**做差**：
+            // 累计值不会因丢事件而永久丢失。
+            Sensor.TYPE_STEP_COUNTER to SensorRatePlan.HIGH_US,
             // 光照单独给慢速率：10 分钟趋势用不上 5 Hz。
             // 但**别指望它省电**——真机上该传感器的 active-count = 2，
             // 系统自己的自动亮度也挂在上面（500 ms），物理器件本来就亮着，
@@ -938,8 +945,16 @@ object PressureRecorder {
                         }
                     }
 
-                    Sensor.TYPE_STEP_DETECTOR -> {
-                        aggregator.addStep()
+                    Sensor.TYPE_STEP_COUNTER -> {
+                        // values[0] = 开机以来累计步数。首帧只建基准；计数变小＝重启/换基，重建基准。
+                        val total = event.values[0]
+                        if (lastStepCounter < 0f || total < lastStepCounter) {
+                            lastStepCounter = total
+                        } else {
+                            val delta = (total - lastStepCounter).toInt()
+                            lastStepCounter = total
+                            aggregator.addSteps(delta)
+                        }
                         stepPulses++
                     }                }
             }
