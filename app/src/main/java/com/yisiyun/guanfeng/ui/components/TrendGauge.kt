@@ -44,11 +44,18 @@ private val ZONES = listOf(
     TrendZone(-9.0f, -6.0f, Color(0xFFFF6B5B)), // 急降（≥强风级）
     TrendZone(-6.0f, -3.0f, Color(0xFFF2C14E)), // 缓降（够上雷暴判据）
     TrendZone(-3.0f, 3.0f, Color(0xFF6EE7A8)),  // 平稳（含自然背景 ±0.6）
-    TrendZone(0.5f, 1.5f, Color(0xFF7FD1E8)),   // 缓升
-    TrendZone(1.5f, 3.0f, Color(0xFF9BB0FF)),   // 急升
+    TrendZone(3.0f, 6.0f, Color(0xFF7FD1E8)),   // 缓升
+    TrendZone(6.0f, 9.0f, Color(0xFF9BB0FF)),   // 急升
 )
 
-private const val MAX_RATE = 3.0f
+/**
+ * 量程上限，单位 **hPa/3小时**（与区段表、与页面那行 ΔP 同一单位）。
+ *
+ * 2026-09-14 踩过的坑：区段表改到 ±9 了，这里还留着 ±3 ——
+ * 于是 ±3 以外的色块被 `coerceIn` 挤到弧外，**黄段整段消失**、只剩一截红，
+ * 指针位置也随之离谱。**改单位时必须同时改量程**。
+ */
+private const val MAX_RATE = 9.0f
 private const val HALF_SWEEP = 120f
 private const val TOP_ANGLE = -90f
 
@@ -57,7 +64,7 @@ private fun angleFor(rate: Float): Float =
 
 @Composable
 fun TrendGauge(
-    rateHpaPerHour: Float,
+    deltaHpaPer3h: Float,
     grade: TrendGrade,
     likelihood: RainLikelihood,
     hasTrend: Boolean,
@@ -86,7 +93,7 @@ fun TrendGauge(
             if (!hasTrend) return@Canvas
 
             // 游标：沿环半径方向的一小段白色刻线，外加一个圆点
-            val angle = angleFor(rateHpaPerHour)
+            val angle = angleFor(deltaHpaPer3h)
             val radians = Math.toRadians(angle.toDouble())
             val radius = size.minDimension / 2f
             val center = Offset(size.width / 2f, size.height / 2f)

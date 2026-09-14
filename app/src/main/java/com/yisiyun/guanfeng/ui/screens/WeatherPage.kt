@@ -130,7 +130,7 @@ fun WeatherPage(state: RecorderState) {
                 // 判定可以保守，仪表必须显示真实读数。乘 3 小时正好是下面那行 ΔP(3h)。
                 // 指针 = **观测净变**（hPa/3h），与下面那行 ΔP 就是同一个数、同一单位。
                 // 曾经用"窗口平均速率"（hPa/小时），两处差 3 倍，同屏并列必然误读。
-                rateHpaPerHour = trend?.observedDeltaHpa ?: 0f,
+                deltaHpaPer3h = trend?.observedDeltaHpa ?: 0f,
                 grade = trend?.grade ?: TrendGrade.INSUFFICIENT,
                 likelihood = likelihood,
                 hasTrend = hasConclusion,
