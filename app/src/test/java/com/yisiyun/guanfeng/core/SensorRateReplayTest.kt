@@ -61,11 +61,11 @@ class SensorRateReplayTest {
         val lines = rawFile.readLines()
         val lastSession = lines.indexOfLast { it.startsWith("#clock") }
         lines.drop(if (lastSession >= 0) lastSession else 0).forEach { line ->
-            if (line.isBlank() || line.startsWith("#") || line.startsWith("timestamp_ns")) return@forEachLine
+            if (line.isBlank() || line.startsWith("#") || line.startsWith("timestamp_ns")) return@forEach
             val c = line.split(',')
-            if (c.size < 3) return@forEachLine
-            val ts = c[0].toLongOrNull() ?: return@forEachLine
-            val ty = c[1].toIntOrNull() ?: return@forEachLine
+            if (c.size < 3) return@forEach
+            val ts = c[0].toLongOrNull() ?: return@forEach
+            val ty = c[1].toIntOrNull() ?: return@forEach
             out += RawEvent(ts, ty, FloatArray(c.size - 2) { c[it + 2].toFloatOrNull() ?: 0f })
         }
         out.sortBy { it.tsNs }
