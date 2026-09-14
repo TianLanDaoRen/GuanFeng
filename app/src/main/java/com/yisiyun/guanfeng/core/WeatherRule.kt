@@ -212,7 +212,7 @@ object WeatherRule {
                 // 现在兜底一律只给 LOW，理由按实际幅度说清楚。
                 likelihood = RainLikelihood.LOW,
                 shortReason = "气压急降但未达判据",
-                advice = adviceFor(RainLikelihood.HIGH),
+                advice = adviceFor(RainLikelihood.LOW),
                 rationale = "3 小时变压 %.1f hPa，气压在急降，通常对应低压槽或强对流逼近。" +
                     "（判据来源：气象学「暴风定律」——3 小时降 4 hPa 即风暴前兆；" +
                     "维基百科亦载气压变化超过 3.5 hPa 时天气变化可期）"
@@ -222,7 +222,7 @@ object WeatherRule {
             TrendGrade.FALLING -> WeatherAssessment(
                 likelihood = RainLikelihood.LOW,
                 shortReason = "气压缓降但未达判据",
-                advice = adviceFor(RainLikelihood.MEDIUM),
+                advice = adviceFor(RainLikelihood.LOW),
                 rationale = "3 小时变压 %.1f hPa，气压缓降，天气有转坏倾向"
                     .format(trend.deltaHpaPer3h)
             )
