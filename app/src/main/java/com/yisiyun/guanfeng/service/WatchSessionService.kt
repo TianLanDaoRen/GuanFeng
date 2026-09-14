@@ -193,6 +193,21 @@ class WatchSessionService : Service() {
                     formal?.likelihood ?: "?",
                 ),
             )
+            // 【定点用】把"引擎扣了多少"与"采集器实际用了多少"并排打出来。
+            // 2026-09-14 查电梯残余 16~20% 时卡住：分不清是引擎内部少扣，
+            // 还是 lastElevationStepHpa「只报最后一步」导致实时偏移漏记。
+            android.util.Log.i(
+                "GuanFengJudge",
+                "归因：窗口内=%s hPa(%d 事件, 末步 %s) | 实时偏移=%.2f hPa | 原始 %s / 解耦 %s".format(
+                    java.util.Locale.US,
+                    java.lang.String.format(java.util.Locale.US, "%.2f", t.elevationMeters * 8.3f * 0.12f),
+                    t.elevationEvents,
+                    java.lang.String.format(java.util.Locale.US, "%.3f", t.lastElevationStepHpa),
+                    state.elevationOffsetMeters / 8.3f,
+                    java.lang.String.format(java.util.Locale.US, "%.2f", state.pressureHpa ?: 0f),
+                    java.lang.String.format(java.util.Locale.US, "%.2f", state.weatherPressureHpa ?: 0f),
+                ),
+            )
         }
         val fast = state?.trendFast?.let { com.yisiyun.guanfeng.core.WeatherRule.assess(it, state.recentFallHpa, state.episode) }
         val active = if (formal != null &&
