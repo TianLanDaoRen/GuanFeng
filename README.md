@@ -14,7 +14,7 @@
 ![Platform](https://img.shields.io/badge/platform-OPPO%20Watch%204%20Pro%20(OWW221)-1F6FEB?style=flat-square)
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.2-7F52FF?style=flat-square&logo=kotlin&logoColor=white)
 ![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-144%20passing-3FB950?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-180%20passing-3FB950?style=flat-square)
 ![Offline](https://img.shields.io/badge/core%20checks-no%20network-8957E5?style=flat-square)
 ![Network](https://img.shields.io/badge/weather%20%2B%20AI-optional%2C%20opt--in-6E7681?style=flat-square)
 ![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-3B7DD8?style=flat-square)
@@ -284,7 +284,7 @@ JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
 
 - Android 11（API 30）设备，`minSdk 27` / `targetSdk 37`
 - 需要 Android Studio 自带的 JBR（工程要求 `toolchainVersion=25`）
-- **144 个单元测试**全部运行在 JVM 上，**不依赖手表**：
+- **180 个单元测试**全部运行在 JVM 上，**不依赖手表**：
 
 ```bash
 ./gradlew :app:testDebugUnitTest
