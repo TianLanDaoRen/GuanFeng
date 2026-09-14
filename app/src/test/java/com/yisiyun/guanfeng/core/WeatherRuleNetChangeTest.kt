@@ -47,9 +47,14 @@ class WeatherRuleNetChangeTest {
             assessment.likelihood == RainLikelihood.HIGH ||
                 assessment.likelihood == RainLikelihood.MEDIUM,
         )
-        assertTrue(
-            "建议必须是带伞类，不能是「无需带伞」",
-            assessment.advice.contains("伞"),
+        // 【2026-09-14 改】原先这里钉的是"建议必须含伞"，那是旧文案的产物。
+        // 主人重定了文案纪律：**红色（急降 ≥6 hPa/3h）才可能下雨**，黄段（缓降）只说"风起云涌"。
+        // 本条样本净降 5 hPa → 落在中度（3~6）→ 说"风起云涌"是**正确**的。
+        // 所以这里改钉主人真正定的那条规矩：**建议必须由倾向唯一决定**（消灭「高+备把伞」那类不一致）。
+        assertEquals(
+            "建议必须与倾向一一对应",
+            WeatherRule.adviceFor(assessment.likelihood),
+            assessment.advice,
         )
     }
 

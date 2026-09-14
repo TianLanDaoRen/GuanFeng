@@ -29,6 +29,24 @@ data class WeatherAssessment(
 
 object WeatherRule {
 
+    /**
+     * **建议文案由倾向唯一决定** —— 这是硬规矩。
+     *
+     * 2026-09-14 真机截图出现过「高 + 备把伞」：倾向被佐证升档抬到 HIGH，
+     * 而建议还留在"过程锁存时那条分支"给的 MEDIUM 文案上 ✗。
+     * 根因是**建议散落在各个分支里各写各的**。现在只留这一处映射，
+     * 任何分支（含佐证升档）都必须经过它 —— 单测钉死"一一对应"。
+     *
+     * 措辞也按主人的判断定：**红色（急降）才可能下雨**，黄段（缓降）只是"天在变"，
+     * 所以 MEDIUM 不再说"备把伞"，改说"风起云涌"。
+     */
+    fun adviceFor(likelihood: RainLikelihood): String = when (likelihood) {
+        RainLikelihood.HIGH -> "带伞"
+        RainLikelihood.MEDIUM -> "风起云涌"
+        RainLikelihood.LOW -> "暂无需带伞"
+        RainLikelihood.UNKNOWN -> "再等等"
+    }
+
     /** 净降幅达到此值即按「暴风定律」的门槛给高倾向。 */
     private const val BIG_FALL_HPA = 6.0f
 
@@ -76,7 +94,7 @@ object WeatherRule {
             return WeatherAssessment(
                 likelihood = if (high) RainLikelihood.HIGH else RainLikelihood.MEDIUM,
                 shortReason = if (high) "已降幅较大" else "可能下雨",
-                advice = if (high) "带伞" else "备把伞",
+                advice = adviceFor(if (high) RainLikelihood.HIGH else RainLikelihood.MEDIUM),
                 // **整段拼接完再 format**。
                 // 原来写成 "a" + "b" + "c".format(...) —— Kotlin 里 `.format` 只绑到
                 // 紧邻的那个字面量，前面的 `+` 拼接没被格式化，于是真机上原样显示
@@ -100,7 +118,7 @@ object WeatherRule {
                 } else {
                     "样本不足"
                 },
-                advice = "再等等",
+                advice = adviceFor(RainLikelihood.UNKNOWN),
                 rationale = if (trend.confidence == TrendConfidence.SHORT_WINDOW) {
                     "窗口只覆盖 %.0f%%，样本还没铺满，斜率不可信".format(trend.coverageFraction * 100f)
                 } else {
@@ -135,7 +153,7 @@ object WeatherRule {
             return WeatherAssessment(
                 likelihood = RainLikelihood.HIGH,
                 shortReason = if (recentFall < netChange) "已降幅较大" else "窗口内急降",
-                advice = "带伞",
+                advice = adviceFor(RainLikelihood.HIGH),
                 // 整段加括号：`.format` 只绑紧邻字面量（本文件踩过两次，别删这对括号）
                 rationale = (
                     "窗口内净降 %.1f hPa，最近数小时累计降幅 %.1f hPa，" +
@@ -147,7 +165,7 @@ object WeatherRule {
             return WeatherAssessment(
                 likelihood = RainLikelihood.MEDIUM,
                 shortReason = if (recentFall < netChange) "已降幅偏大" else "气压缓降",
-                advice = "备把伞",
+                advice = adviceFor(RainLikelihood.MEDIUM),
                 rationale = (
                     "窗口内净降 %.1f hPa，最近数小时累计降幅 %.1f hPa，" +
                         "天气有转坏倾向"
@@ -161,7 +179,7 @@ object WeatherRule {
             return WeatherAssessment(
                 likelihood = RainLikelihood.UNKNOWN,
                 shortReason = "抖动过大",
-                advice = "再等等",
+                advice = adviceFor(RainLikelihood.UNKNOWN),
                 // 【必须整段加括号】`.format` 只作用于**紧邻的那个字面量**：
                 // 写成 "A" + "B".format(...) 时，A 里的 %.1f 会原样打到手表上。
                 // 这条坑本项目踩过两次（上一次在净变幅那条），所以现在有守卫测试：
@@ -178,7 +196,7 @@ object WeatherRule {
             return WeatherAssessment(
                 likelihood = RainLikelihood.LOW,
                 shortReason = "已转平稳",
-                advice = "暂无需带伞",
+                advice = adviceFor(RainLikelihood.LOW),
                 rationale = "窗口内气压曲线不接近直线（R² %.2f），但净变幅只有 %.1f hPa，" +
                     "说明此前的变化已结束、当前没有继续恶化"
                         .format(trend.fitRSquared, netChange)
@@ -189,7 +207,7 @@ object WeatherRule {
             TrendGrade.FALLING_FAST -> WeatherAssessment(
                 likelihood = RainLikelihood.HIGH,
                 shortReason = "气压急降",
-                advice = "带伞",
+                advice = adviceFor(RainLikelihood.HIGH),
                 rationale = "3 小时变压 %.1f hPa，气压在急降，通常对应低压槽或强对流逼近。" +
                     "（判据来源：气象学「暴风定律」——3 小时降 4 hPa 即风暴前兆；" +
                     "维基百科亦载气压变化超过 3.5 hPa 时天气变化可期）"
@@ -199,7 +217,7 @@ object WeatherRule {
             TrendGrade.FALLING -> WeatherAssessment(
                 likelihood = RainLikelihood.MEDIUM,
                 shortReason = "气压缓降",
-                advice = "备把伞",
+                advice = adviceFor(RainLikelihood.MEDIUM),
                 rationale = "3 小时变压 %.1f hPa，气压缓降，天气有转坏倾向"
                     .format(trend.deltaHpaPer3h)
             )
@@ -209,7 +227,7 @@ object WeatherRule {
                 shortReason = "气压平稳",
                 // 建议原先写「无变化」——与趋势评级「平稳」是同义重复，主人一眼看出。
                 // 改成行动导向的说法，才配得上占一个 14sp 的位置。
-                advice = "无需带伞",
+                advice = adviceFor(RainLikelihood.LOW),
                 rationale = "3 小时变压 %.1f hPa，气压平稳"
                     .format(trend.deltaHpaPer3h)
             )
@@ -217,7 +235,7 @@ object WeatherRule {
             TrendGrade.RISING -> WeatherAssessment(
                 likelihood = RainLikelihood.LOW,
                 shortReason = "气压回升",
-                advice = "天气转稳",
+                advice = adviceFor(RainLikelihood.LOW),
                 rationale = "3 小时变压 %+.1f hPa，气压回升，天气趋稳"
                     .format(trend.deltaHpaPer3h)
             )
@@ -225,7 +243,7 @@ object WeatherRule {
             TrendGrade.RISING_FAST -> WeatherAssessment(
                 likelihood = RainLikelihood.LOW,
                 shortReason = "气压急升",
-                advice = "转晴伴风",
+                advice = adviceFor(RainLikelihood.LOW),
                 rationale = "3 小时变压 %+.1f hPa，气压急升，多为冷空气过境后转晴"
                     .format(trend.deltaHpaPer3h)
             )
@@ -233,7 +251,7 @@ object WeatherRule {
             TrendGrade.INSUFFICIENT -> WeatherAssessment(
                 likelihood = RainLikelihood.UNKNOWN,
                 shortReason = "样本不足",
-                advice = "多攒点样本",
+                advice = adviceFor(RainLikelihood.UNKNOWN),
                 rationale = "有效样本 ${trend.weatherSamples} 个，还不足以判断趋势"
             )
         }
