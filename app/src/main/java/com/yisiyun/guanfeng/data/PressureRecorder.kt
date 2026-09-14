@@ -624,9 +624,10 @@ object PressureRecorder {
         // 【两档速率】平时 1Hz，气压速率一超阈值就升 5Hz（见 SensorRatePlan 的实测依据）。
         // 计步是事件型传感器，速率参数对它没意义，永远留在"高速档"那一档的写法上。
         val core = listOf(
-            Sensor.TYPE_PRESSURE to currentRateUs,
-            Sensor.TYPE_GRAVITY to currentRateUs,
-            Sensor.TYPE_LINEAR_ACCELERATION to currentRateUs,
+            Sensor.TYPE_PRESSURE to SensorRatePlan.LOW_US,
+            // 【空闲档不注册运动流】它们被硬件钳在 5Hz，降 ODR 无效，只能整个注销；
+            // 触发时由 switchRate 注册回来。计步器必须常驻：它是"电梯/爬楼 vs 平地走路"
+            // 的判别证据，且是事件型、几乎不耗电。
             Sensor.TYPE_STEP_DETECTOR to SensorRatePlan.HIGH_US,
             // 光照单独给慢速率：10 分钟趋势用不上 5 Hz。
             // 但**别指望它省电**——真机上该传感器的 active-count = 2，
@@ -768,22 +769,35 @@ object PressureRecorder {
      */
     private fun updateSamplingRate(nowMs: Long) {
         val manager = sensorManager ?: return
-        if (fastUntilMs > 0L && SensorRatePlan.shouldReturnToLow(nowMs, fastUntilMs)) {
-            fastUntilMs = 0L
-            switchRate(manager, SensorRatePlan.LOW_US)
-            return
-        }
-        if (fastUntilMs > 0L) return
         // 30 秒基线速率（用已落盘的样本；样本不够就不判）
         val latest = samples.lastOrNull() ?: return
-        val past = samples.lastOrNull { latest.timestampMs - it.timestampMs >= 20_000L } ?: return
-        val spanMs = latest.timestampMs - past.timestampMs
-        if (spanMs < 20_000L) return
-        val rate = (latest.pressureHpa - past.pressureHpa) / (spanMs / 60_000f)
-        if (SensorRatePlan.shouldGoFast(rate, spanMs)) {
+        val past = samples.lastOrNull { latest.timestampMs - it.timestampMs >= SensorRatePlan.SHORT_BASELINE_MS }
+        val spanMs = past?.let { latest.timestampMs - it.timestampMs } ?: 0L
+        val rate = if (spanMs >= SensorRatePlan.SHORT_BASELINE_MS) {
+            (latest.pressureHpa - past!!.pressureHpa) / (spanMs / 60_000f)
+        } else {
+            0f
+        }
+        val far = samples.lastOrNull { latest.timestampMs - it.timestampMs >= SensorRatePlan.LONG_BASELINE_MS }
+        val longSpan = far?.let { latest.timestampMs - it.timestampMs } ?: 0L
+        val longRate = if (longSpan >= SensorRatePlan.LONG_BASELINE_MS) {
+            (latest.pressureHpa - far!!.pressureHpa) / (longSpan / 60_000f)
+        } else {
+            0f
+        }
+        val shortFired = SensorRatePlan.shouldGoFast(rate, spanMs)
+        val longFired = SensorRatePlan.shouldGoFast(longRate, longSpan)
+        if (shortFired || longFired) {
             fastUntilMs = nowMs + SensorRatePlan.HOLD_MS
             switchRate(manager, SensorRatePlan.HIGH_US)
-            Log.i(TAG, "气压速率 ${csvNum(rate, 2)} hPa/分 → 升到 5Hz（保持 ${SensorRatePlan.HOLD_MS / 1000} 秒）")
+            Log.i(
+                TAG,
+                "触发高速档（${if (shortFired) "短尺度 ${csvNum(rate, 2)}" else "长尺度 ${csvNum(longRate, 2)}"} hPa/分）" +
+                    " → 续期至 ${SensorRatePlan.HOLD_MS / 1000} 秒后",
+            )
+        } else if (fastUntilMs > 0L && SensorRatePlan.shouldReturnToLow(nowMs, fastUntilMs)) {
+            fastUntilMs = 0L
+            switchRate(manager, SensorRatePlan.LOW_US)
         }
     }
 
@@ -799,9 +813,18 @@ object PressureRecorder {
         ).forEach { type ->
             val sensor = runCatching { manager.getDefaultSensor(type) }.getOrNull() ?: return@forEach
             runCatching { manager.unregisterListener(listener, sensor) }
-            runCatching { manager.registerListener(listener, sensor, rateUs, BATCH_LATENCY_US) }
+            // 空闲档只留气压：重力/线加速度被硬件钳在 5Hz，降频无效，只能整个注销
+            val keep = type == Sensor.TYPE_PRESSURE || rateUs != SensorRatePlan.LOW_US
+            if (keep) runCatching { manager.registerListener(listener, sensor, rateUs, BATCH_LATENCY_US) }
         }
-        Log.i(TAG, if (rateUs == SensorRatePlan.LOW_US) "已回到 1Hz 低速档" else "核心传感器已切到 5Hz")
+        Log.i(
+            TAG,
+            if (rateUs == SensorRatePlan.LOW_US) {
+                "已回到空闲档：只留气压 1Hz + 计步，运动流已注销"
+            } else {
+                "已切到高速档：气压/重力/线加速度 5Hz（含续期）"
+            },
+        )
     }
 
     /** 把排队的原始事件刷进 raw_sensors.csv（由采样循环每 5 秒调一次，顺带的那次唤醒）。 */

@@ -45,4 +45,29 @@ class SensorRatePlanTest {
             SensorRatePlan.HOLD_MS >= 60_000L,
         )
     }
+
+
+    @Test
+    fun `双尺度取或_短尺度抓脉冲长尺度抓慢漂移`() {
+        // 短尺度（电梯脉冲）：20 秒基线上的 2.8 hPa/分 → 必须触发
+        assertTrue(SensorRatePlan.shouldGoFast(2.8f, 20_000L))
+        // 长尺度（缆车/滑降慢漂移）：0.08 hPa/分 够不到短尺度阈值，但 5 分钟基线上必须触发
+        assertFalse("短尺度看不到慢漂移", SensorRatePlan.shouldGoFast(0.08f, 20_000L))
+        assertTrue("长尺度必须抓到它", SensorRatePlan.shouldGoFast(0.08f, 300_000L))
+        // 0.06 hPa/分 = 3.6 hPa/3h，是真实天气的量级 —— **有意**保留证据
+        assertTrue(SensorRatePlan.shouldGoFast(0.06f, 300_000L))
+        // 自然背景（半日潮 0.003 hPa/分）绝不许触发
+        assertFalse(SensorRatePlan.shouldGoFast(0.003f, 300_000L))
+    }
+
+    @Test
+    fun `长尺度看得到_不代表可以只留长尺度`() {
+        // 这条钉住"短尺度不能删"：60 秒的电梯在 5 分钟基线上会被稀释到阈值以下，
+        // 所以 20 秒这一档必须留着（回放实测：只留长尺度时电梯偏移差 0.02 → 8.88 hPa）
+        assertTrue("短尺度在 20 秒基线上看得见电梯", SensorRatePlan.shouldGoFast(2.8f, 20_000L))
+        // 注意：这里**不能**用一个"折算后的假速率"来证明稀释 —— 真实稀释发生在
+        // "5 分钟基线里只有 1 分钟在降"这个数据形态上，不是把速率按时间比例缩放。
+        // 稀释的证据在回放器里（只留长尺度时电梯偏移差 0.02 → 8.88 hPa），不在这条单测里。
+        assertTrue("短尺度基线不足 20 秒时不判档", !SensorRatePlan.shouldGoFast(2.8f, 10_000L))
+    }
 }
