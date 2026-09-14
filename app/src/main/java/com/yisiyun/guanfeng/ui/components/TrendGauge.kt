@@ -160,7 +160,11 @@ fun TrendGauge(
             text = "风雨倾向",
             color = INK_MID,
             fontSize = 9.sp,
-            modifier = Modifier.align(Alignment.Center).offset(y = (-44).dp),
+// 位置是按几何定死的，不是试出来的：
+            //   大字 38sp，顶边约在中心上方 23dp；环内半径约 52dp。
+            //   所以标签放 −30dp：离大字 7dp（紧贴上沿）、离弧线 17dp（不遮挡）。
+            //   上一版放 −44dp，左上角到 −49dp，正好顶到弧线（主人截图"有些遮挡"）。
+            modifier = Modifier.align(Alignment.Center).offset(y = (-30).dp),
         )
 
         Text(
