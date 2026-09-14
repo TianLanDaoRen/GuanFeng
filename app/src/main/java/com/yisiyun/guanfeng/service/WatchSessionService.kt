@@ -171,6 +171,29 @@ class WatchSessionService : Service() {
         // 测试窗口优先：让主人能立刻看到"真的转坏时"indicator 长什么样
         AlertState.activeTestLabel()?.let { return it }
         val formal = state?.trend?.let { com.yisiyun.guanfeng.core.WeatherRule.assess(it, state.recentFallHpa, state.episode) }
+        // 【判定输入进 logcat】——不落盘、不加文件，一行日志就够（主人 2026-09-14 定）。
+        // 起因：记录页显示"3 小时变压 −1.8（按新门限属平稳）"却下"有转坏倾向"的结论。
+        // 反推了三轮全错，因为驱动量是 `recentFall`（近段自最高点跌幅），它不落盘也不显示。
+        // 这行把它和另外几个量一起打出来，下次"中"一冒出来就能一眼看清是谁驱动的。
+        state?.trend?.let { t ->
+            val ep = state.episode
+            android.util.Log.i(
+                "GuanFengJudge",
+                "判定输入：3h净变=%s 近段跌幅=%s 置信=%s 覆盖=%d%% 过程=%s 倾向=%s".format(
+                    java.util.Locale.US,
+                    java.lang.String.format(java.util.Locale.US, "%.2f", t.observedDeltaHpa),
+                    java.lang.String.format(java.util.Locale.US, "%.2f", state.recentFallHpa ?: 0f),
+                    t.confidence,
+                    (t.coverageFraction * 100).toInt(),
+                    if (ep != null && ep.active) {
+                        "维持" + java.lang.String.format(java.util.Locale.US, "%.2f", ep.dropHpa)
+                    } else {
+                        "无"
+                    },
+                    formal?.likelihood ?: "?",
+                ),
+            )
+        }
         val fast = state?.trendFast?.let { com.yisiyun.guanfeng.core.WeatherRule.assess(it, state.recentFallHpa, state.episode) }
         val active = if (formal != null &&
             formal.likelihood != com.yisiyun.guanfeng.core.RainLikelihood.UNKNOWN

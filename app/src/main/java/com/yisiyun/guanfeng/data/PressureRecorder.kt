@@ -152,7 +152,17 @@ object PressureRecorder {
     private const val VERTICAL_TAU_S = 3f
 
     /** 累计降幅的观察窗：足够长到能记住一场天气过程，又不至于记住上一天的旧账。 */
+    /** recentFall（近段自最高点跌幅）的回溯窗口。2026-09-14 从 6h 改 3h：与全 app 的 3 小时锚点统一。 */
     private const val RECENT_FALL_WINDOW_MS = 3L * 60L * 60L * 1000L
+
+    /**
+     * **过程快照的恢复年龄闸门**——语义与上面完全不同，绝不能再共用同一个常量。
+     *
+     * 2026-09-14 我正是因为两处共用一个常量，把 6h 改成 3h 时**顺手改掉了恢复策略**，
+     * 而注释里还写着 6 小时（代码与注释已经不一致）。
+     * 闸门的本意（见恢复处的注释）：隔夜再打开应用时，昨天那场雨不该继续算数。
+     */
+    private const val EPISODE_RESTORE_MAX_AGE_MS = 6L * 60L * 60L * 1000L
 
     /** 少于这么多个样本（约 10 分钟）就不算累计降幅，避免刚启动时报出假降幅。 */
     private const val RECENT_FALL_MIN_SAMPLES = 120
@@ -477,7 +487,7 @@ object PressureRecorder {
             // 隔夜再打开应用时，昨天那场雨不该继续算数。
             persisted.episode?.let { saved ->
                 val ageMs = System.currentTimeMillis() - persisted.episodeWrittenMs
-                if (persisted.episodeWrittenMs > 0L && ageMs <= RECENT_FALL_WINDOW_MS) {
+                if (persisted.episodeWrittenMs > 0L && ageMs <= EPISODE_RESTORE_MAX_AGE_MS) {
                     episodeTracker.restore(saved)
                     Log.i(
                         TAG,
