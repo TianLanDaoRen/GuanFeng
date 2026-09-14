@@ -297,16 +297,29 @@ class SensorRateReplayTest {
         // ⑤ **空闲时运动流不存在**：把空闲期的重力(9)/线加速度(10)事件整个删掉，
         // 只留气压(+计步)。触发期间照旧全有。这是"平时注销加速度计"的直接模型 ——
         // 空闲样本于是拿不到任何运动证据（verticalAccel=0、位移≈0），走引擎的"无证据"分支。
-        val fast = fastIntervals(window, off)
+        // ⑤ 三档触发阈值对照（主人要求：把阈值降到 0.15 / 0.10 来"补上慢速竖直位移的缺口"）
+        // 代价看两处：① 保留了多少运动事件（保留越多 = 越费电）
+        //             ② 走走停停/静止会不会因此冒出误判（那才是真风险）
         // 注意单位：fast 区间是**毫秒**（epoch），事件是**纳秒**（boot）——必须先换算再比。
         // 第一版直接拿 `e.tsNs + off`（纳秒）去查毫秒区间，结果一条都没命中，
         // 于是一整个电梯的 8.88 hPa 被当成天气，跑出了"偏移差 8.88 hPa"的假失败。
-        val evs = window.filter { e ->
-            (e.type != 9 && e.type != 10) || fast.any { (e.tsNs + off) / 1_000_000L in it }
+        for (th in listOf(0.3f, 0.15f, 0.10f)) {
+            val fast = fastIntervals(window, off, th)
+            val evs = window.filter { e ->
+                (e.type != 9 && e.type != 10) || fast.any { (e.tsNs + off) / 1_000_000L in it }
+            }
+            val keptMotion = window.count { it.type == 9 || it.type == 10 } - (evs.size - evs.count { it.type != 9 && it.type != 10 })
+            val t5 = engine.compute(aggregate(evs, off, 1.0, false))
+            val totalMotion = maxOf(1, window.count { it.type == 9 || it.type == 10 })
+            // 名字必须说准：这个数是**删掉**的运动事件（= 空闲时长），不是保留的。
+            // 第一版我写成"保留"，于是"0.15 时 218 条"被读成"只保留 2%"——
+            // 真相恰恰相反：低阈值让触发器几乎一直开着，绝大多数事件**都被保留**，省电直接归零。
+            println(
+                "⑤ 空闲停运动流（阈值 ${"%.2f".format(th)} hPa/分）：" +
+                    "**删掉**运动事件 $keptMotion 条（占 ${keptMotion * 100 / totalMotion}%）"
+            )
+            report(t5, base)
         }
-        val t5 = engine.compute(aggregate(evs, off, 1.0, false))
-        println("⑤ 空闲停运动流+续期触发：采样周期 1Hz，触发时恢复 5Hz（删掉 ${window.size - evs.size} 条运动事件）")
-        report(t5, base)
     }
 
     /** 打印一条方案的结果（与基线对照）。 */
@@ -328,7 +341,7 @@ class SensorRateReplayTest {
      * 换成登山缆车或滑雪滑降（5~20 分钟持续变压）就会中途掉回低速档、把运动证据丢掉。
      * 续期之后，**不需要预知运动要持续多久**。
      */
-    private fun fastIntervals(window: List<RawEvent>, off: Long): List<LongRange> {
+    private fun fastIntervals(window: List<RawEvent>, off: Long, thresholdHpaPerMin: Float = 0.3f): List<LongRange> {
         val press = window.filter { it.type == 6 }.sortedBy { it.tsNs }
         if (press.isEmpty()) return emptyList()
         val out = ArrayList<LongRange>()
@@ -340,7 +353,7 @@ class SensorRateReplayTest {
             val spanMs = (press[i].tsNs - past.tsNs) / 1_000_000L
             val rate = (press[i].v[0] - past.v[0]) / (spanMs / 60_000f)
             val now = (press[i].tsNs + off) / 1_000_000L
-            if (abs(rate) > 0.3f && spanMs >= 20_000L) {
+            if (abs(rate) > thresholdHpaPerMin && spanMs >= 20_000L) {
                 if (startMs == 0L) startMs = now
                 endMs = now + 60_000L
             } else if (startMs != 0L && now > endMs) {
