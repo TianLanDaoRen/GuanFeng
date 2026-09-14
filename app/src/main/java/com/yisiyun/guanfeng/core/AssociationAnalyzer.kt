@@ -123,7 +123,7 @@ object AssociationAnalyzer {
      * 按新判据这四天**一天都不算** —— 这才是诚实的结论：那几天只是正常的云层与风的波动
      * （主人原话）。
      */
-    const val BIG_CHANGE_HPA = 1.5f
+    const val BIG_CHANGE_HPA = 3.0f
 
     /** 3 小时变压的窗口（气象惯例）。 */
     const val BIG_CHANGE_WINDOW_HOURS = 3

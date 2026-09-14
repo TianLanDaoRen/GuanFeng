@@ -65,7 +65,7 @@ class AiDigestTest {
         assertTrue("必须有近 7 天段", digest.contains("\"recent_7_days\":{"))
         assertTrue("近 7 天段带每日气压极值", digest.contains("\"daily_pressure_hpa\":["))
         assertTrue("日期要带上", digest.contains("\"date\":\"1/1\""))
-        assertTrue("阈值要带上，便于模型理解口径", digest.contains("\"big_change_threshold_hpa\":1.5"))
+        assertTrue("阈值要带上，便于模型理解口径", digest.contains("\"big_change_threshold_hpa\":3.0"))
         assertTrue("必须是合法 JSON 的开头与结尾", digest.startsWith("{") && digest.endsWith("}"))
     }
 

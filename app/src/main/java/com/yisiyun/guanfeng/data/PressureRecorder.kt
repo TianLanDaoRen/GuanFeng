@@ -152,7 +152,7 @@ object PressureRecorder {
     private const val VERTICAL_TAU_S = 3f
 
     /** 累计降幅的观察窗：足够长到能记住一场天气过程，又不至于记住上一天的旧账。 */
-    private const val RECENT_FALL_WINDOW_MS = 6L * 60L * 60L * 1000L
+    private const val RECENT_FALL_WINDOW_MS = 3L * 60L * 60L * 1000L
 
     /** 少于这么多个样本（约 10 分钟）就不算累计降幅，避免刚启动时报出假降幅。 */
     private const val RECENT_FALL_MIN_SAMPLES = 120

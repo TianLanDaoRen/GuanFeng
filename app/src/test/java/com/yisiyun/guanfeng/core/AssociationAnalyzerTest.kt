@@ -111,7 +111,7 @@ class AssociationAnalyzerTest {
         // 两个已观测小时、2 hPa 变压（恰好等于门限 BIG_CHANGE_HPA）
         val swingDay = listOf(
             bucket(dayStart, 1000f, 1000f, 1000f),
-            bucket(dayStart + hour, 998f, 998f, 998f),
+            bucket(dayStart + hour, 996f, 996f, 996f),
         )
         // 另一天不是（落差 0.5 hPa）
         val calmDay = listOf(bucket(dayStart + day, 1000f, 1000f, 1000.5f))

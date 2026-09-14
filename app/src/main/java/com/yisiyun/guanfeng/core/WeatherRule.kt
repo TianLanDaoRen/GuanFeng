@@ -30,10 +30,10 @@ data class WeatherAssessment(
 object WeatherRule {
 
     /** 净降幅达到此值即按「暴风定律」的门槛给高倾向。 */
-    private const val BIG_FALL_HPA = 4.0f
+    private const val BIG_FALL_HPA = 6.0f
 
     /** 净降幅达到此值按中等倾向处理。 */
-    private const val MODERATE_FALL_HPA = 2.0f
+    private const val MODERATE_FALL_HPA = 3.0f
 
     /** 解除所需回升幅度，与 WeatherEpisodeTracker 的默认值保持一致（迟滞门限同量级）。 */
     private const val CLEAR_RISE_HPA = 1.5f
