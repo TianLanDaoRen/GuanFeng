@@ -250,6 +250,19 @@ object ElevationClassifier {
  * 已知取舍：爬楼期间若天气同时在变，那一小段天气变化会被一并计入 offset。
  * 量级可接受——爬楼持续几分钟，天气变化约 0.02 hPa/min，5 分钟也只误吸 0.1 hPa。
  */
+/**
+ * **中尺度归属**：约 3 分钟内单向净变达它、且窗口内**有步态**，就算高度变化。
+ *
+ * 为什么需要：引擎原有尺度是 5 秒（单步）/约 60 秒（速率门 0.3 hPa/分）/3 小时（天气趋势），
+ * **1~5 分钟这一段是空的**——慢速竖直运动恰好全住那里（实测车库缓坡 0.28 hPa/分、
+ * 楼梯 0.5、爬泰山约 1，而 0.3 的门把最慢那种整段漏成天气）。
+ * 为什么取 0.2/3 分钟：天气 ≤0.056 hPa/分 → 3 分钟最多 0.17（门槛之下）；
+ * 车库坡 3 分钟 0.6（门槛之上 3 倍）；手腕噪声平均后远小于 0.2。
+ * 为什么安全：**步态是气象不会有的信号**。爬 100 楼/泰山也吃这条，不需要"动完要停"。
+ */
+private const val MED_ELEV_HPA = 0.2f
+private const val MED_SAMPLES = 36
+
 class PressureTrendEngine(
     private val windowMs: Long = DEFAULT_WINDOW_MS,
     private val minSamples: Int = DEFAULT_MIN_SAMPLES,
@@ -351,7 +364,15 @@ class PressureTrendEngine(
             val rateOverride = runLength >= 3 &&
                 abs(rate) > ElevationClassifier.OVERRIDE_EVIDENCE_HPA_PER_MIN
 
-            if (fastChange && (inVerticalTransit || rateOverride) && abs(stepDelta) >= minStepDeltaHpa) {
+            // 中尺度：约 3 分钟单向净变 ≥0.2 hPa 且**窗口内有步态** → 算高度变化
+            var medSteps = 0
+            for (k in maxOf(0, index - MED_SAMPLES + 1)..index) medSteps += windowed[k].stepsInWindow
+            val medNet = sample.pressureHpa - windowed[maxOf(0, index - MED_SAMPLES)].pressureHpa
+            val mediumMove = medSteps > 0 && runLength >= 3 && abs(medNet) >= MED_ELEV_HPA
+
+            if ((fastChange && (inVerticalTransit || rateOverride) || mediumMove) &&
+                abs(stepDelta) >= minStepDeltaHpa
+            ) {
                 elevationOffset += stepDelta
                 elevationEvents++
                 // 只把「最后一步」报出去：调用方据此跨窗口累积偏移，
