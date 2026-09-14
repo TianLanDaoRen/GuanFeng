@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -134,12 +135,7 @@ fun TrendGauge(
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             // 没有趋势时不要显示一个孤零零的短横（视觉上像坏了），
             // 而是给一个明确的状态词，字号也相应收小
-                        Text(
-                text = "风雨倾向",
-                color = INK_MID,
-                fontSize = 9.sp,
-            )
-if (hasTrend) {
+            if (hasTrend) {
                 Text(
                     text = likelihood.label,
                     color = likelihoodColor(likelihood),
@@ -157,6 +153,16 @@ if (hasTrend) {
 
         // 两端标注：色区本身不自解释——主人第一次就问了"这五个颜色分别代表什么"。
         // 只标两个极端，中间三档由游标位置与下方的趋势评级说明，避免堆字。
+        // 「风雨倾向」放在**外层 Box** 里、不参与环心 Column 的居中 ——
+        // 否则它是 Column 的第 4 个孩子，整块会重新居中，大字被压到弧心以下
+        // （主人 2026-09-14 截图："间隔有些大了，导致中太靠下"）。
+        Text(
+            text = "风雨倾向",
+            color = INK_MID,
+            fontSize = 9.sp,
+            modifier = Modifier.align(Alignment.Center).offset(y = (-44).dp),
+        )
+
         Text(
             text = "急降",
             color = Color(0xFFFF6B5B),
