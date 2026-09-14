@@ -156,6 +156,27 @@ fun GuanFengApp() {
         startLocating()
     }
 
+    // 【运动与体感权限：主动申请，2026-09-14 主人指出】
+    // 清单里声明了 ACTIVITY_RECOGNITION 与 BODY_SENSORS，但此前**从未主动申请**——
+    // 全项目只有一个权限启动器且只申请定位，所以主人只能在系统"应用设置"里手动打开。
+    // 这里进入界面就申请一次：没授权的才要（已授权的系统不会重复弹）。
+    // 给不给都往下走：没权限时计步/心率读不到，界面显示为未知，不阻塞任何流程。
+    val sensorPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { /* 结果不影响流程，授权与否都能继续用 */ }
+
+    LaunchedEffect(Unit) {
+        val needed = listOf(
+            android.Manifest.permission.ACTIVITY_RECOGNITION,
+            android.Manifest.permission.BODY_SENSORS,
+            android.Manifest.permission.POST_NOTIFICATIONS,
+        ).filter {
+            androidx.core.content.ContextCompat.checkSelfPermission(context, it) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        if (needed.isNotEmpty()) sensorPermission.launch(needed.toTypedArray())
+    }
+
     // Wi-Fi 门是**实时的**：用户在系统面板里开完 Wi-Fi 回来，这里应当自动放行进入定位。
     // 只在门开着的时候轮询——一个本地属性读取，代价可忽略。
     //
