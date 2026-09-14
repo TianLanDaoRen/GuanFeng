@@ -36,9 +36,14 @@ import com.yisiyun.guanfeng.ui.theme.INK_HIGH
 private data class TrendZone(val from: Float, val to: Float, val color: Color)
 
 private val ZONES = listOf(
-    TrendZone(-3.0f, -1.5f, Color(0xFFFF6B5B)), // 急降
-    TrendZone(-1.5f, -0.5f, Color(0xFFF2C14E)), // 缓降
-    TrendZone(-0.5f, 0.5f, Color(0xFF6EE7A8)),  // 平稳
+    // 【单位统一为 hPa/3 小时，与文献同源】界取 ±3 与 ±6：
+    //   3 = 气象学 Law of Storms 的雷暴起点；6 = 强风；10 = 大风。
+    //   所以黄段（缓降）从"刚够上雷暴判据"开始，红段（急降）从强风级开始。
+    //   旧版是 hPa/小时（±1.5/±4.5）—— 与页面上那行 hPa/3h 的 ΔP 同屏并列，
+    //   单位不同导致"ΔP −2.1 才刚到黄区"的误读（主人 2026-09-14 指出）。
+    TrendZone(-9.0f, -6.0f, Color(0xFFFF6B5B)), // 急降（≥强风级）
+    TrendZone(-6.0f, -3.0f, Color(0xFFF2C14E)), // 缓降（够上雷暴判据）
+    TrendZone(-3.0f, 3.0f, Color(0xFF6EE7A8)),  // 平稳（含自然背景 ±0.6）
     TrendZone(0.5f, 1.5f, Color(0xFF7FD1E8)),   // 缓升
     TrendZone(1.5f, 3.0f, Color(0xFF9BB0FF)),   // 急升
 )

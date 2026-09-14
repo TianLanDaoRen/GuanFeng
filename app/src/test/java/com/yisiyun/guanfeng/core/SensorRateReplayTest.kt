@@ -54,7 +54,13 @@ class SensorRateReplayTest {
 
     private fun loadRaw(): List<RawEvent> {
         val out = ArrayList<RawEvent>(40_000)
-        rawFile.forEachLine { line ->
+        // **只取最后一次会话**：raw_sensors.csv 是追加式，每次应用启动都会写一行
+        // `#clock,<epoch_ms>,<boot_ns>` 作为会话头。而开机时钟在**手表重启**后会重置，
+        // 于是整份文件里存在**两条互相重叠的时间线**——先 concat 再 sortBy(tsNs) 会把它们
+        // 交错在一起，窗口识别随之失真（2026-09-14 实测撞到：黑匣子重开后本测试直接失败）。
+        val lines = rawFile.readLines()
+        val lastSession = lines.indexOfLast { it.startsWith("#clock") }
+        lines.drop(if (lastSession >= 0) lastSession else 0).forEach { line ->
             if (line.isBlank() || line.startsWith("#") || line.startsWith("timestamp_ns")) return@forEachLine
             val c = line.split(',')
             if (c.size < 3) return@forEachLine
