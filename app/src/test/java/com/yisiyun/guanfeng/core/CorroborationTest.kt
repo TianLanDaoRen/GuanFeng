@@ -17,8 +17,8 @@ class CorroborationTest {
     @Test
     fun `光照骤降且基准够亮时算作佐证`() {
         val items = CorroborationEngine.evaluate(
-            lightLux = 240f,
-            lightDelta10Min = -260f, // 10 分钟前 500 lux，跌到 240，跌 52%
+            lightLux = 2400f,
+            lightDelta10Min = -2600f, // 10 分钟前 500 lux，跌到 240，跌 52%
             heartRateBpm = null,
             restingHeartRateBpm = null,
             wristTemperatureC = null,
@@ -34,8 +34,8 @@ class CorroborationTest {
     @Test
     fun `基准亮度太低时不算_夜里关灯不是天气`() {
         val items = CorroborationEngine.evaluate(
-            lightLux = 1f,
-            lightDelta10Min = -19f, // 20 lux 跌到 1 lux，跌幅 95% 但基准无意义
+            lightLux = 10f,
+            lightDelta10Min = -190f, // 20 lux 跌到 1 lux，跌幅 95% 但基准无意义
             heartRateBpm = null,
             restingHeartRateBpm = null,
             wristTemperatureC = null,
@@ -48,8 +48,8 @@ class CorroborationTest {
     @Test
     fun `跌幅不够不算`() {
         val items = CorroborationEngine.evaluate(
-            lightLux = 420f,
-            lightDelta10Min = -80f, // 500 → 420，跌 16%
+            lightLux = 4200f,
+            lightDelta10Min = -800f, // 500 → 420，跌 16%
             heartRateBpm = null,
             restingHeartRateBpm = null,
             wristTemperatureC = null,
@@ -177,8 +177,8 @@ class CorroborationTest {
     @Test
     fun `运动中仍然保留光照佐证_云不会因为你在跑步就不来`() {
         val items = CorroborationEngine.evaluate(
-            lightLux = 240f,
-            lightDelta10Min = -260f,
+            lightLux = 2400f,
+            lightDelta10Min = -2600f,
             heartRateBpm = 150f,
             restingHeartRateBpm = 62f,
             wristTemperatureC = null,

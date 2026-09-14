@@ -49,7 +49,16 @@ object CorroborationEngine {
     const val LIGHT_DROP_RATIO = 0.4f
 
     /** 基准亮度低于此值就不算——夜间、袖内、室内的跌幅没有天气含义。 */
-    const val LIGHT_MEANINGFUL_LUX = 200f
+    /**
+ * "光骤降"要算数，**骤降前必须亮到户外级别**（lux）。
+ *
+ * 2026-09-14 那次假"高"：主人在家里，光照 400 → 14 lux（掉 96%），
+ * 于是 LIGHT_DROP 成立、倾向被升到 HIGH —— 而当时阳光明媚。
+ * 400 lux 在明亮房间里很常见，**室内换房间与乌云压顶在"骤降比例"上无法区分**。
+ * 所以把门槛提到 1000 lux（户外白天通常数千，室内一般 <500），
+ * 这样"只有户外级强光骤降"才可能被解释成云层增厚。
+ */
+const val LIGHT_MEANINGFUL_LUX = 1000f
 
     /** 静息心率高于基线此值，视为身体已有反应（仅提示）。 */
     const val HEART_RATE_DELTA_BPM = 8f
