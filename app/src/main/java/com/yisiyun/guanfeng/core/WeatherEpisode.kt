@@ -49,7 +49,20 @@ data class WeatherEpisode(
  * 中间的灰色地带**保持原状态**——这正是迟滞的意义。
  */
 class WeatherEpisodeTracker(
-    private val enterDropHpa: Float = 1.5f,
+    /**
+     * 进入门限：**3 小时净降 2.0 hPa**（2026-09-14 主人定 A 方案）。
+     *
+     * 旧实现是「自最高点累计降 1.5、不限时」—— 那个最高点永不遗忘
+     * （`if (pressureHpa > peak) peak = pressureHpa`），于是一整天慢慢降 1.5 也能进过程。
+     * 现在最高点只取最近 3 小时（与全 app 的 3 小时锚点一致），数值 2.0（形成迟滞）。
+     */
+    private val enterDropHpa: Float = 2.0f,
+
+    /** 参照最高点的回溯窗口。 */
+    private val peakWindowMs: Long = 3L * 60L * 60L * 1000L,
+
+    /** 解除超时（D 方案）：连续这么久既没创新低、也没回升到解除线，就自动解除。 */
+    private val clearTimeoutMs: Long = 12L * 60L * 60L * 1000L,
     /**
      * 解除所需的回升幅度。**与进入门限取同量级**，这是刻意的：
      *
@@ -70,6 +83,9 @@ class WeatherEpisodeTracker(
     private var startMs = 0L
     private var lastDrop = 0f
     private var lastClearedRise: Float? = null
+    private val winMs = ArrayDeque<Long>()
+    private val winHpa = ArrayDeque<Float>()
+    private var lastLowMs = 0L
 
     fun current(): WeatherEpisode = WeatherEpisode(
         active = active,
@@ -110,6 +126,15 @@ class WeatherEpisodeTracker(
 
     /** 喂入一个**天气分量**气压（已解耦高度）。 */
     fun add(timestampMs: Long, pressureHpa: Float): WeatherEpisode {
+        // 3 小时回溯窗口：进新样本压入，超窗弹出。
+        // 窗口空时**不能抛异常、也不能清参照点**：夜里睡眠模式或装包会让样本隔几小时
+        // （实测最长 18831 秒），窗口必被弹空——此时沿用跨会话持久化的 peak。
+        winMs.addLast(timestampMs); winHpa.addLast(pressureHpa)
+        while (winMs.isNotEmpty() && timestampMs - winMs.first() > peakWindowMs) {
+            winMs.removeFirst(); winHpa.removeFirst()
+        }
+        if (winHpa.isNotEmpty()) peak = winHpa.max()
+
         if (peak.isNaN()) {
             peak = pressureHpa
             min = pressureHpa
@@ -118,8 +143,8 @@ class WeatherEpisodeTracker(
         }
 
         if (!active) {
-            // 未进入过程：跟踪参照最高点（气压回升时抬高它），等一次足够深的降幅
-            if (pressureHpa > peak) peak = pressureHpa
+            // 未进入过程：参照最高点只取最近 3 小时（窗口空则沿用持久化的 peak）
+            if (peak.isNaN()) peak = pressureHpa
             min = peak
             val drop = pressureHpa - peak
             lastDrop = 0f
@@ -128,19 +153,23 @@ class WeatherEpisodeTracker(
                 startMs = timestampMs
                 lastClearedRise = null
                 min = pressureHpa
+                lastLowMs = timestampMs
                 lastDrop = drop
             }
             return current()
         }
 
         // 过程之中：更新最低点；只看"自最低点回升了多少"，与时间无关
-        if (pressureHpa < min) min = pressureHpa
+        if (pressureHpa < min) {
+            min = pressureHpa
+            lastLowMs = timestampMs
+        }
         lastDrop = min - peak
         val rise = pressureHpa - min
-        if (rise >= clearRiseHpa) {
+        if (rise >= clearRiseHpa || timestampMs - lastLowMs >= clearTimeoutMs) {
             // 低压已过：解除，并把参照点重置到当前，准备迎接下一轮
             active = false
-            lastClearedRise = rise
+            lastClearedRise = if (rise >= clearRiseHpa) rise else null
             peak = pressureHpa
             min = pressureHpa
             startMs = timestampMs

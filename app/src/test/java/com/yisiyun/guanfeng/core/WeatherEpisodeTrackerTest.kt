@@ -32,10 +32,10 @@ class WeatherEpisodeTrackerTest {
     fun `持续下降越过阈值即进入过程`() {
         val tracker = WeatherEpisodeTracker()
 
-        val state = feed(tracker, listOf(1010f, 1009.5f, 1009f, 1008.4f))
+        val state = feed(tracker, listOf(1010f, 1009.5f, 1009f, 1007.4f))
 
-        assertTrue("累计降 1.6 hPa 应当进入过程", state.active)
-        assertEquals(-1.6f, state.dropHpa, 0.05f)
+        assertTrue("累计降 2.6 hPa 应当进入过程（门限 2026-09-14 起为 2.0）", state.active)
+        assertEquals(-2.6f, state.dropHpa, 0.05f)
     }
 
     @Test
@@ -44,51 +44,55 @@ class WeatherEpisodeTrackerTest {
 
         val state = feed(tracker, listOf(1010f, 1009.8f, 1009.9f, 1009.7f, 1009.8f))
 
-        assertFalse("降幅不到 1.5 hPa 不该报警", state.active)
+        assertFalse("降幅不到 2.0 hPa 不该报警", state.active)
     }
 
     @Test
     fun `自最低点回升一点即解除`() {
         val tracker = WeatherEpisodeTracker()
-        feed(tracker, listOf(1010f, 1008f, 1007f))
+        feed(tracker, listOf(1010f, 1008f, 1006.5f))
         assertTrue(tracker.current().active)
 
         val state = feed(tracker, listOf(1008.6f), startMinutes = 10)
 
         assertFalse("回升 1.6 hPa 表示低压已过", state.active)
         assertNotNull("应当记下解除时的回升幅度", state.clearedRiseHpa)
-        assertEquals(1.6f, state.clearedRiseHpa!!, 0.05f)
+        assertEquals(2.1f, state.clearedRiseHpa!!, 0.05f)
     }
 
     @Test
     fun `过程持续很久也不会因为时间流逝而忘掉`() {
         // 这正是滑动窗口方案的原罪：降完一直下着雨超过 6 小时，窗口一滑就忘。
         val tracker = WeatherEpisodeTracker()
-        feed(tracker, listOf(1010f, 1008f))
+        feed(tracker, listOf(1010f, 1007.5f))
         assertTrue(tracker.current().active)
 
         // 之后 12 小时气压基本不动（雨一直下着），模拟时间流逝
         var state = tracker.current()
-        for (index in 0 until 720) {
+        for (index in 0 until 700) { // 700 分钟 = 11.7 小时，仍在「12 小时内不许解除」之内
             state = tracker.add((20 + index).toLong() * minute, 1008f + if (index % 2 == 0) 0.02f else -0.02f)
         }
 
-        assertTrue("12 小时没有回升，过程必须仍然挂着", state.active)
-        assertEquals("降幅照样记得", -2f, state.dropHpa, 0.1f)
+                // 【2026-09-14 主人定 D】旧规矩是「时间流逝永不解除」，实测导致 09-13 那次过程
+        // 从下午挂到深夜（预警不消失）。新规矩：**12 小时内绝不解除**，
+        // 超过 12 小时既无新低、也无回升到解除线 → 自动解除。
+        assertTrue("11 小时内没有回升，过程必须仍然挂着", tracker.current().active)
+        val cleared = tracker.add((20 + 720).toLong() * minute, 1007.5f)
+        assertFalse("连续 12 小时既无新低也无回升 → 自动解除", cleared.active)
     }
 
     @Test
     fun `雨时下时停不得来回翻状态`() {
         // 雨带间歇：气压在 1008 附近小幅上下抖（±0.6，峰峰 1.2），不到解除门限 1.5
         val tracker = WeatherEpisodeTracker()
-        feed(tracker, listOf(1010f, 1008.2f))
+        feed(tracker, listOf(1010f, 1007.5f))
         assertTrue(tracker.current().active)
 
         var flips = 0
         var previous = tracker.current().active
         var state = tracker.current()
         for (index in 0 until 120) {
-            val wobble = 1008.2f + if (index % 4 < 2) 0.6f else -0.6f
+            val wobble = 1007.5f + if (index % 4 < 2) 0.6f else -0.6f
             state = tracker.add((10 + index).toLong() * minute, wobble)
             if (state.active != previous) flips++
             previous = state.active
