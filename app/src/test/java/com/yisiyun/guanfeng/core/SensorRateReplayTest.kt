@@ -291,14 +291,64 @@ class SensorRateReplayTest {
             "净变=${"%.2f".format(base.deltaHpaPer3h)} hPa 置信=${base.confidence}")
         for (p in plans.drop(1)) {
             val t = engine.compute(aggregate(window, off, p.hz, p.triggered))
-            val offsetErrHpa = abs(t.elevationMeters - base.elevationMeters) * HPA_PER_METER_NEAR_SEA_LEVEL
-            println(
-                "${p.name}：事件=${t.elevationEvents}（基线 ${base.elevationEvents}）" +
-                    " 位移=${"%.1f".format(t.elevationMeters)} m" +
-                    " 净变=${"%.2f".format(t.deltaHpaPer3h)} hPa" +
-                    " **偏移差=${"%.2f".format(offsetErrHpa)} hPa**" +
-                    " 置信=${t.confidence}"
-            )
+            report(t, base)
         }
+
+        // ⑤ **空闲时运动流不存在**：把空闲期的重力(9)/线加速度(10)事件整个删掉，
+        // 只留气压(+计步)。触发期间照旧全有。这是"平时注销加速度计"的直接模型 ——
+        // 空闲样本于是拿不到任何运动证据（verticalAccel=0、位移≈0），走引擎的"无证据"分支。
+        val fast = fastIntervals(window, off)
+        // 注意单位：fast 区间是**毫秒**（epoch），事件是**纳秒**（boot）——必须先换算再比。
+        // 第一版直接拿 `e.tsNs + off`（纳秒）去查毫秒区间，结果一条都没命中，
+        // 于是一整个电梯的 8.88 hPa 被当成天气，跑出了"偏移差 8.88 hPa"的假失败。
+        val evs = window.filter { e ->
+            (e.type != 9 && e.type != 10) || fast.any { (e.tsNs + off) / 1_000_000L in it }
+        }
+        val t5 = engine.compute(aggregate(evs, off, 1.0, false))
+        println("⑤ 空闲停运动流+续期触发：采样周期 1Hz，触发时恢复 5Hz（删掉 ${window.size - evs.size} 条运动事件）")
+        report(t5, base)
+    }
+
+    /** 打印一条方案的结果（与基线对照）。 */
+    private fun report(t: TrendResult, base: TrendResult) {
+        val offsetErrHpa = abs(t.elevationMeters - base.elevationMeters) * HPA_PER_METER_NEAR_SEA_LEVEL
+        println(
+            "     事件=${t.elevationEvents}（基线 ${base.elevationEvents}）" +
+                " 位移=${"%.1f".format(t.elevationMeters)} m" +
+                " 净变=${"%.2f".format(t.deltaHpaPer3h)} hPa" +
+                " **偏移差=${"%.2f".format(offsetErrHpa)} hPa**" +
+                " 置信=${t.confidence}"
+        )
+    }
+
+    /**
+     * 续期式的高速档区间：只要气压速率还在阈值以上，就把高速档延到「最后一个超阈样本 + 60 秒」。
+     *
+     * 这是为了修掉"固定 60 秒"的毛病 —— 那个 60 秒是**电梯本位**的（电梯全程几十秒），
+     * 换成登山缆车或滑雪滑降（5~20 分钟持续变压）就会中途掉回低速档、把运动证据丢掉。
+     * 续期之后，**不需要预知运动要持续多久**。
+     */
+    private fun fastIntervals(window: List<RawEvent>, off: Long): List<LongRange> {
+        val press = window.filter { it.type == 6 }.sortedBy { it.tsNs }
+        if (press.isEmpty()) return emptyList()
+        val out = ArrayList<LongRange>()
+        var startMs = 0L
+        var endMs = 0L
+        for (i in press.indices) {
+            val past = press.subList(0, i).lastOrNull { press[i].tsNs - it.tsNs >= 20_000_000_000L }
+                ?: continue
+            val spanMs = (press[i].tsNs - past.tsNs) / 1_000_000L
+            val rate = (press[i].v[0] - past.v[0]) / (spanMs / 60_000f)
+            val now = (press[i].tsNs + off) / 1_000_000L
+            if (abs(rate) > 0.3f && spanMs >= 20_000L) {
+                if (startMs == 0L) startMs = now
+                endMs = now + 60_000L
+            } else if (startMs != 0L && now > endMs) {
+                out.add(startMs..endMs)
+                startMs = 0L
+            }
+        }
+        if (startMs != 0L) out.add(startMs..endMs)
+        return out
     }
 }
