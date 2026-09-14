@@ -60,7 +60,24 @@ fun RecordPage(state: RecorderState) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val trend = state.trend
-    val rationale = trend?.let { WeatherRule.assess(it, state.recentFallHpa, state.episode).rationale }
+    // 【判定依据必须写出真正的驱动量】
+    // 2026-09-14 主人发现：页面显示"3 小时变压 −1.9 hPa（按新门限属平稳）"，
+    // 结论却是"气压缓降、有转坏倾向"——因为**那结论来自早先锁存的「风雨过程」**，
+    // 而过程一旦挂上就强制 ≥ 中度。两个不同时间尺度的东西并排摆着，读者看不出区别。
+    // 所以过程在维持时，把这条线索**放到最前面**说清楚。
+    val rationale = trend?.let {
+        val assessment = WeatherRule.assess(it, state.recentFallHpa, state.episode)
+        val episode = state.episode
+        if (episode != null && episode.active) {
+            val clock = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+                .format(java.util.Date(episode.startMs))
+            "本轮风雨过程仍在维持（自 $clock 起累计降 " +
+                java.lang.String.format(java.util.Locale.US, "%.1f", -episode.dropHpa) +
+                " hPa）｜ " + assessment.rationale
+        } else {
+            assessment.rationale
+        }
+    }
     var observedToday by remember { mutableStateOf(WeatherObservationLogger.countToday(context)) }
     var observeFeedback by remember { mutableStateOf("") }
     var noticeFeedback by remember { mutableStateOf("") }
