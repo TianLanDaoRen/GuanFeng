@@ -21,6 +21,7 @@ import com.yisiyun.guanfeng.core.TrendGrade
 import kotlin.math.cos
 import kotlin.math.sin
 import com.yisiyun.guanfeng.ui.theme.INK_MID
+import com.yisiyun.guanfeng.ui.theme.INK_LOW
 import com.yisiyun.guanfeng.ui.theme.INK_HIGH
 
 /**
@@ -55,6 +56,19 @@ private val ZONES = listOf(
  * 于是 ±3 以外的色块被 `coerceIn` 挤到弧外，**黄段整段消失**、只剩一截红，
  * 指针位置也随之离谱。**改单位时必须同时改量程**。
  */
+/** 区段名：**由区间反推**，不另存一份字符串，免得名字与区间各说各话。 */
+private fun zoneLabel(z: TrendZone): String = when {
+    z.to <= -6f -> "急降"
+    z.to <= -3f -> "缓降"
+    z.from < 3f -> "平稳"
+    z.from < 6f -> "缓升"
+    else -> "急升"
+}
+
+/** 由落点值反查所处区段（与色块同源：标注与针永远不可能说不一致的话）。 */
+private fun zoneOf(value: Float): TrendZone =
+    ZONES.firstOrNull { value >= it.from && value < it.to } ?: ZONES.last()
+
 private const val MAX_RATE = 9.0f
 private const val HALF_SWEEP = 120f
 private const val TOP_ANGLE = -90f
@@ -138,11 +152,7 @@ fun TrendGauge(
                 color = INK_MID,
                 fontSize = 9.sp,
             )
-            Text(
-                text = if (hasTrend) grade.label else "攒样本中",
-                color = Color(0xFFD0D0D0),
-                fontSize = 11.sp,
-            )
+
         }
 
         // 两端标注：色区本身不自解释——主人第一次就问了"这五个颜色分别代表什么"。
@@ -152,6 +162,14 @@ fun TrendGauge(
             color = Color(0xFFFF6B5B),
             fontSize = 8.sp,
             modifier = Modifier.align(Alignment.BottomStart).padding(start = 4.dp, bottom = 6.dp),
+        )
+        // 中间那格：**与两端同字号、同贴底基线**，只有颜色不同（取当前区段色）。
+        // 值也从同一个落点推出来 —— 主人 2026-09-14 指出过"针在绿段而中间写缓降"。
+        Text(
+            text = if (hasTrend) zoneLabel(zoneOf(deltaHpaPer3h)) else "攒样本中",
+            color = if (hasTrend) zoneOf(deltaHpaPer3h).color else INK_LOW,
+            fontSize = 8.sp,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp),
         )
         Text(
             text = "急升",
