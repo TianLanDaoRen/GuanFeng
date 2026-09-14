@@ -205,8 +205,13 @@ object WeatherRule {
 
         return when (trend.grade) {
             TrendGrade.FALLING_FAST -> WeatherAssessment(
-                likelihood = RainLikelihood.HIGH,
-                shortReason = "气压急降",
+                // 【2026-09-14 修】兜底分支曾经按 grade（速率）直接给 HIGH/MEDIUM，
+                // 于是它**绕过上面按文献定的 3 小时门限**：
+                // 实测 3h 净变 −1.69（按门限属平稳）、近段跌幅 0、无过程，
+                // 但 rate = −0.56 hPa/h 落进 FALLING → 直接判中度。
+                // 现在兜底一律只给 LOW，理由按实际幅度说清楚。
+                likelihood = RainLikelihood.LOW,
+                shortReason = "气压急降但未达判据",
                 advice = adviceFor(RainLikelihood.HIGH),
                 rationale = "3 小时变压 %.1f hPa，气压在急降，通常对应低压槽或强对流逼近。" +
                     "（判据来源：气象学「暴风定律」——3 小时降 4 hPa 即风暴前兆；" +
@@ -215,8 +220,8 @@ object WeatherRule {
             )
 
             TrendGrade.FALLING -> WeatherAssessment(
-                likelihood = RainLikelihood.MEDIUM,
-                shortReason = "气压缓降",
+                likelihood = RainLikelihood.LOW,
+                shortReason = "气压缓降但未达判据",
                 advice = adviceFor(RainLikelihood.MEDIUM),
                 rationale = "3 小时变压 %.1f hPa，气压缓降，天气有转坏倾向"
                     .format(trend.deltaHpaPer3h)
